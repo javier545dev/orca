@@ -143,7 +143,7 @@ describe('NativeChatToolRun', () => {
     expect(screen.getByText('shell sleep 1')).toBeInTheDocument()
   })
 
-  it('marks a failed tool run without opening its payload', () => {
+  it('keeps failed tool runs visually neutral while collapsed', () => {
     const blocks: NativeChatBlock[] = [
       { type: 'tool-call', name: 'shell', input: { command: 'false' }, state: 'failed' },
       { type: 'tool-result', output: 'exit 1', isError: true }
@@ -151,8 +151,39 @@ describe('NativeChatToolRun', () => {
 
     const { container } = render(<NativeChatToolRun blocks={blocks} expandSignal={false} />)
 
-    expect(container.querySelector('.text-destructive')).toBeInTheDocument()
+    expect(container.querySelector('.lucide-check')).toBeInTheDocument()
+    expect(container.querySelector('.lucide-circle-alert')).toBeNull()
     expect(screen.queryByText('exit 1')).toBeNull()
+  })
+
+  it('keeps settled tool activity behind the completed turn disclosure', () => {
+    const blocks: NativeChatBlock[] = [
+      { type: 'tool-call', name: 'shell', input: { command: 'git log -1' }, state: 'failed' },
+      { type: 'tool-result', output: 'exit 128', isError: true }
+    ]
+
+    const { rerender } = render(
+      <NativeChatToolRun
+        blocks={blocks}
+        expandSignal={false}
+        expandOverride={false}
+        activeTurnIsWorking={false}
+      />
+    )
+
+    expect(screen.queryByText('git log -1')).toBeNull()
+    expect(screen.queryByText('exit 128')).toBeNull()
+
+    rerender(
+      <NativeChatToolRun
+        blocks={blocks}
+        expandSignal={false}
+        expandOverride
+        activeTurnIsWorking={false}
+      />
+    )
+
+    expect(screen.getByText('shell git log -1')).toBeInTheDocument()
   })
 
   it('settles an orphaned running call when its turn lifecycle has ended', () => {
@@ -165,6 +196,7 @@ describe('NativeChatToolRun', () => {
     )
 
     expect(screen.queryByText('Running sleep 1')).toBeNull()
-    expect(container.querySelector('.text-destructive')).toBeInTheDocument()
+    expect(container.querySelector('.lucide-check')).toBeInTheDocument()
+    expect(container.querySelector('.lucide-circle-alert')).toBeNull()
   })
 })

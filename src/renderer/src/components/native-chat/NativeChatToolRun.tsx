@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Check, ChevronRight, CircleAlert, SquareTerminal, Wrench } from 'lucide-react'
+import { Check, ChevronRight, SquareTerminal, Wrench } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { translate } from '@/i18n/i18n'
 import {
@@ -60,10 +60,15 @@ function activeToolLabel(call: Extract<NativeChatBlock, { type: 'tool-call' }>):
 /** A single inline tool line — `▸ ToolName  preview` — that expands in place to
  *  show the call's diff/input or the result's body. Tool calls read as flat
  *  lines in the conversation rather than boxed blocks (mobile parity). Lines only
- *  mount while the parent run is open, so each starts expanded (opening the run
- *  reveals every line at once) and is then individually collapsible. */
-function ToolLine({ block }: { block: NativeChatBlock }): React.JSX.Element | null {
-  const [expanded, setExpanded] = useState(true)
+ *  mount while the parent run is open and are individually collapsible. */
+function ToolLine({
+  block,
+  initiallyExpanded = true
+}: {
+  block: NativeChatBlock
+  initiallyExpanded?: boolean
+}): React.JSX.Element | null {
+  const [expanded, setExpanded] = useState(initiallyExpanded)
 
   let name: string
   let preview: string
@@ -99,6 +104,7 @@ function ToolLine({ block }: { block: NativeChatBlock }): React.JSX.Element | nu
           'group flex w-full items-center gap-1.5 py-0.5 text-left',
           hasDetail ? 'cursor-pointer' : 'cursor-default'
         )}
+        aria-expanded={hasDetail ? expanded : undefined}
       >
         <code className="shrink-0 font-mono text-xs font-semibold text-foreground/90 transition-colors group-hover:text-foreground">
           {name}
@@ -151,17 +157,20 @@ function ToolLine({ block }: { block: NativeChatBlock }): React.JSX.Element | nu
 export function NativeChatToolRun({
   blocks,
   expandSignal,
-  activeTurnIsWorking
+  activeTurnIsWorking,
+  expandOverride
 }: {
   blocks: NativeChatBlock[]
   /** Toolbar-driven desired open state. Each change re-syncs this run's state. */
   expandSignal: boolean
+  /** Per-turn disclosure state controlled by the completed turn status row. */
+  expandOverride?: boolean
   /** Structured lifecycle state, when available, keeps orphaned running calls from spinning. */
   activeTurnIsWorking?: boolean
-}): React.JSX.Element {
-  const [open, setOpen] = useState(expandSignal)
+}): React.JSX.Element | null {
+  const [open, setOpen] = useState(expandOverride ?? expandSignal)
   // Re-sync when the global toolbar toggle flips.
-  useEffect(() => setOpen(expandSignal), [expandSignal])
+  useEffect(() => setOpen(expandOverride ?? expandSignal), [expandOverride, expandSignal])
 
   const callCount = countToolCalls(blocks) || blocks.length
   const summary = summarizeToolRun(blocks)
@@ -170,20 +179,27 @@ export function NativeChatToolRun({
     (call) => call.state === 'running' && activeTurnIsWorking !== false
   )
   const latestActiveCall = activeCalls.at(-1)
+  const isSettled = latestActiveCall == null
+  // The turn caret opens the activity group, while each child tool remains
+  // collapsed. The global expand toolbar still opens child details together.
+  const expandToolLines = expandOverride === undefined ? open : false
   const ActiveToolIcon =
     latestActiveCall && COMMAND_TOOL_NAMES.has(normalizedToolName(latestActiveCall.name))
       ? SquareTerminal
       : Wrench
-  const hasFailure =
-    calls.some((call) => call.state === 'failed') ||
-    (activeTurnIsWorking === false && calls.some((call) => call.state === 'running')) ||
-    blocks.some((block) => isToolResultBlock(block) && block.isError)
   const fallbackLabel =
     callCount === 1
       ? translate('components.native-chat.tool.countOne', '1 tool call')
       : translate('components.native-chat.tool.countN', '{{value0}} tool calls', {
           value0: callCount
         })
+
+  // Completed turn activity belongs behind the turn-status disclosure. Keeping
+  // the grouped row visible here made a failed child command look like the
+  // whole response was still running (or had failed) even while collapsed.
+  if (expandOverride === false && isSettled && activeTurnIsWorking === false) {
+    return null
+  }
 
   return (
     // Extra top margin sets the tool run apart from the assistant prose above it
@@ -213,11 +229,7 @@ export function NativeChatToolRun({
           aria-expanded={open}
         >
           <span className="flex size-6 shrink-0 items-center justify-center text-muted-foreground">
-            {hasFailure ? (
-              <CircleAlert className="size-3.5 text-destructive" />
-            ) : (
-              <Check className="size-3.5" />
-            )}
+            <Check className="size-3.5" />
           </span>
           <span className="shrink-0 font-mono text-[11px] font-bold text-muted-foreground transition-colors group-hover:text-foreground/80">
             {callCount}×
@@ -236,8 +248,18 @@ export function NativeChatToolRun({
       )}
       {open ? (
         <div className="mt-1">
-          {blocks.map((block, i) => (
-            <ToolLine key={i} block={block} />
+          {blocks.map((block) => (
+            <ToolLine
+              key={
+                block.type === 'tool-call'
+                  ? `${block.name}:${JSON.stringify(block.input)}`
+                  : block.type === 'tool-result'
+                    ? `${block.type}:${block.output}`
+                    : block.type
+              }
+              block={block}
+              initiallyExpanded={expandToolLines}
+            />
           ))}
         </div>
       ) : null}

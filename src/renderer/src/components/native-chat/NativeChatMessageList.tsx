@@ -1,129 +1,31 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDown, ArrowUp, Image as ImageIcon } from 'lucide-react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { ArrowDown } from 'lucide-react'
 import CommentMarkdown, {
   type CommentMarkdownLinkClickHandler
 } from '@/components/sidebar/CommentMarkdown'
 import { cn } from '@/lib/utils'
 import { translate } from '@/i18n/i18n'
-import { basename } from '@/lib/path'
-import {
-  isTextBlock,
-  type NativeChatBlock,
-  type NativeChatMessage
-} from '../../../../shared/native-chat-types'
+import type { NativeChatMessage } from '../../../../shared/native-chat-types'
 import type { NativeChatLiveSession } from './use-native-chat-live-session'
 import { orderNativeChatMessages } from './native-chat-message-grouping'
 import { stripNoiseMessages } from './native-chat-noise'
 import { foldToolMessages, splitNativeChatBlocks } from './native-chat-tool-fold'
 import { isNearBottom, shouldShowJumpToLatest, type ScrollGeometry } from './native-chat-autoscroll'
-import { isNativeChatPastedImagePath } from './native-chat-image-paste'
 import { NativeChatToolRun } from './NativeChatToolRun'
-import { NativeChatCopyButton } from './NativeChatCopyButton'
 import { shouldShowNativeChatTypingIndicator } from './native-chat-typing-indicator'
-import { nativeChatProviderFrameSummary } from '../../../../shared/native-chat-provider-frame-summary'
 import { NativeChatWorkingStatus } from './NativeChatWorkingStatus'
+import { useNativeChatTurnStatus } from './use-native-chat-turn-status'
+import { nativeChatProseToMarkdown } from './native-chat-prose'
+import {
+  NativeChatAgentControls,
+  NativeChatImageAttachments,
+  ProviderFrameRow
+} from './NativeChatTranscriptChrome'
+
+export { ProviderFrameRow } from './NativeChatTranscriptChrome'
 
 function geometryOf(el: HTMLElement): ScrollGeometry {
   return { scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight }
-}
-
-function proseToMarkdown(blocks: NativeChatBlock[]): string {
-  return blocks
-    .map((block) => {
-      if (isTextBlock(block)) {
-        return block.text
-      }
-      return ''
-    })
-    .filter((part) => part.length > 0)
-    .join('\n\n')
-}
-
-function ImageAttachmentRefs({ blocks }: { blocks: NativeChatBlock[] }): React.JSX.Element | null {
-  const images = blocks.filter((block) => block.type === 'image-ref')
-  if (images.length === 0) {
-    return null
-  }
-  return (
-    <div className="mb-2 flex flex-wrap gap-1.5">
-      {images.map((image, index) => {
-        const label = image.alt ?? image.path ?? image.url ?? 'Image'
-        const name =
-          image.path && isNativeChatPastedImagePath(image.path)
-            ? translate('components.native-chat.composer.pastedImageLabel', 'Pasted image')
-            : image.path
-              ? basename(image.path)
-              : label
-        return (
-          <div
-            key={`${label}-${index}`}
-            className="flex max-w-full items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1 text-xs text-muted-foreground"
-            title={label}
-          >
-            <ImageIcon className="size-3.5 shrink-0" />
-            <span className="truncate">{name}</span>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-/** Footer controls for an agent message: copy its prose or align it to the viewport top. */
-function AgentControls({
-  markdown,
-  onScrollToTop,
-  className
-}: {
-  markdown: string
-  onScrollToTop: () => void
-  className?: string
-}): React.JSX.Element {
-  return (
-    <div className={cn('flex items-center gap-1', className)}>
-      <NativeChatCopyButton text={markdown} />
-      <button
-        type="button"
-        onClick={onScrollToTop}
-        aria-label={translate(
-          'components.native-chat.scrollMessageToTop',
-          'Scroll this message to top'
-        )}
-        title={translate('components.native-chat.scrollMessageToTop', 'Scroll this message to top')}
-        className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <ArrowUp className="size-3.5" />
-      </button>
-    </div>
-  )
-}
-
-export function ProviderFrameRow({ block }: { block: NativeChatBlock }): React.JSX.Element | null {
-  if (block.type !== 'text' || !block.providerFrame) {
-    return null
-  }
-  const frame = block.providerFrame
-  return (
-    <details className="group text-xs text-muted-foreground">
-      <summary className="flex cursor-pointer list-none items-center gap-2 rounded-md px-2 py-1 font-mono hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-        <span className="transition-transform group-open:rotate-90">›</span>
-        <span className="font-medium text-foreground">{frame.provider}</span>
-        <span className="truncate">{nativeChatProviderFrameSummary(block)}</span>
-        {frame.payload.truncated ? (
-          <span>
-            ·{' '}
-            {translate('components.native-chat.providerFrame.byteLength', '{{value0}} bytes', {
-              value0: frame.payload.byteLength
-            })}
-          </span>
-        ) : null}
-      </summary>
-      <pre className="scrollbar-sleek mt-1 max-h-64 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted p-2 font-mono text-xs text-foreground">
-        {frame.payload.head}
-        {frame.payload.truncated ? '\n…' : ''}
-      </pre>
-    </details>
-  )
 }
 
 /** One message: its prose first, then a collapsible run folding all of the
@@ -136,7 +38,8 @@ function MessageRow({
   onScrollMessageToTop,
   onLinkClick,
   allowFileUriLinks = false,
-  deliveryFailed = false
+  deliveryFailed = false,
+  activityExpandOverride
 }: {
   message: NativeChatMessage
   expandSignal: boolean
@@ -146,10 +49,11 @@ function MessageRow({
   onLinkClick?: CommentMarkdownLinkClickHandler
   allowFileUriLinks?: boolean
   deliveryFailed?: boolean
+  activityExpandOverride?: boolean
 }): React.JSX.Element | null {
   const rowRef = useRef<HTMLDivElement | null>(null)
   const { prose, tools } = useMemo(() => splitNativeChatBlocks(message.blocks), [message.blocks])
-  const markdown = proseToMarkdown(prose)
+  const markdown = nativeChatProseToMarkdown(prose)
   const hasImages = prose.some((block) => block.type === 'image-ref')
   const isUser = message.role === 'user'
   const isReasoning = message.role === 'reasoning'
@@ -178,11 +82,6 @@ function MessageRow({
   }
 
   if (isUser) {
-    // Why: an optimistic echo is rendered identically to a real user turn (no
-    // muting, no "Queued" label) so that when the real transcript turn lands and
-    // replaces it, there is no visible state change — the send just appears and
-    // stays. (A distinct "queued" treatment flickered normal→queued→normal as the
-    // transcript caught up.)
     return (
       <div ref={rowRef} className="flex flex-col items-end gap-0.5">
         {/* User turns get a distinct muted fill (not the card/canvas color) so
@@ -190,7 +89,7 @@ function MessageRow({
         <div className="max-w-[85%] rounded-lg rounded-tr-sm bg-muted px-3.5 py-2.5 text-sm text-foreground">
           {markdown ? (
             <>
-              <ImageAttachmentRefs blocks={prose} />
+              <NativeChatImageAttachments blocks={prose} />
               <CommentMarkdown
                 content={markdown}
                 variant="document"
@@ -200,7 +99,7 @@ function MessageRow({
               />
             </>
           ) : (
-            <ImageAttachmentRefs blocks={prose} />
+            <NativeChatImageAttachments blocks={prose} />
           )}
         </div>
         {deliveryFailed ? (
@@ -229,7 +128,7 @@ function MessageRow({
         isSystem && 'text-xs text-muted-foreground'
       )}
     >
-      <ImageAttachmentRefs blocks={prose} />
+      <NativeChatImageAttachments blocks={prose} />
       {markdown ? (
         <CommentMarkdown
           content={markdown}
@@ -243,11 +142,12 @@ function MessageRow({
         <NativeChatToolRun
           blocks={tools}
           expandSignal={expandSignal}
+          expandOverride={activityExpandOverride}
           activeTurnIsWorking={activeTurnIsWorking}
         />
       ) : null}
       {showControls ? (
-        <AgentControls
+        <NativeChatAgentControls
           markdown={markdown}
           onScrollToTop={scrollToTop}
           className="pointer-events-none mt-1 -mb-5 w-fit select-none opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
@@ -282,10 +182,19 @@ export function NativeChatMessageList({
   const contentRef = useRef<HTMLDivElement | null>(null)
   const [stuckToBottom, setStuckToBottom] = useState(true)
   const [showJump, setShowJump] = useState(false)
+  const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<string>>(new Set())
+  const toggleExpandedTurn = useCallback((turnKey: string) => {
+    setExpandedTurnIds((current) => {
+      const next = new Set(current)
+      if (next.has(turnKey)) {
+        next.delete(turnKey)
+      } else {
+        next.add(turnKey)
+      }
+      return next
+    })
+  }, [])
 
-  // Why: mirror stuck state into a ref so the auto-scroll layout effect can read
-  // it without depending on it — depending on stuckToBottom (which scrollToBottom
-  // sets) would re-fire the effect in a self-loop.
   const stuckToBottomRef = useRef(stuckToBottom)
   stuckToBottomRef.current = stuckToBottom
 
@@ -297,20 +206,14 @@ export function NativeChatMessageList({
     [session.messages]
   )
   const showTypingIndicator = shouldShowNativeChatTypingIndicator({ messages, isWorking })
-  const fallbackWorkingStartedAtRef = useRef<number | null>(null)
-  useEffect(() => {
-    fallbackWorkingStartedAtRef.current = isWorking
-      ? (fallbackWorkingStartedAtRef.current ?? Date.now())
-      : null
-  }, [isWorking])
-  const activeWorkingStartedAt = workingStartedAt ?? fallbackWorkingStartedAtRef.current
-  const hasToolActivity = messages.some((message) =>
-    message.blocks.some((block) => block.type === 'tool-call' || block.type === 'tool-result')
-  )
+  const latestUserIndex = messages.findLastIndex((message) => message.role === 'user')
+  const turnStatuses = useNativeChatTurnStatus({
+    messages,
+    latestUserIndex,
+    isWorking,
+    workingStartedAt
+  })
 
-  // When an older page prepends, the scroll content grows above the viewport.
-  // Capture the pre-render scroll height so the layout effect can restore the
-  // user's position (no jump) instead of letting the browser keep scrollTop.
   const prependAnchorRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null)
 
   const handleScroll = useCallback(() => {
@@ -346,18 +249,12 @@ export function NativeChatMessageList({
     if (!container) {
       return
     }
-    // Detach synchronously (not just via the pending onScroll) so an in-place
-    // streaming growth can't re-pin to the bottom mid-flight and fight this
-    // deliberate scroll. The ref is what the resize observer reads.
     stuckToBottomRef.current = false
     setStuckToBottom(false)
     const delta = el.getBoundingClientRect().top - container.getBoundingClientRect().top
     container.scrollTo({ top: container.scrollTop + delta, behavior: 'smooth' })
   }, [])
 
-  // Re-pin to the bottom when new content arrives, but only if the user hasn't
-  // scrolled up. Layout effect so the jump happens before paint (no flicker).
-  // When an older page just prepended, restore the prior position instead.
   useLayoutEffect(() => {
     const el = scrollRef.current
     if (el && prependAnchorRef.current) {
@@ -373,11 +270,6 @@ export function NativeChatMessageList({
     }
   }, [messages.length, isWorking, showTypingIndicator, scrollToBottom])
 
-  // Content growing without a message-count change (a streaming assistant turn
-  // extends its own message in place) never re-fires the layout effect above.
-  // Observe the container so those in-place growths still re-pin: stay glued to
-  // the bottom while stuck, otherwise just refresh the jump affordance. This is
-  // what removes most "Jump to latest" clicks during a live response.
   useEffect(() => {
     const el = scrollRef.current
     if (!el || typeof ResizeObserver === 'undefined') {
@@ -416,12 +308,6 @@ export function NativeChatMessageList({
           // the desktop analog of the mobile pinch-zoom (Chromium/Electron only).
           style={{ zoom: fontScale }}
         >
-          {showTypingIndicator ? (
-            <NativeChatWorkingStatus
-              startedAt={activeWorkingStartedAt}
-              thinking={!hasToolActivity}
-            />
-          ) : null}
           {hasMore ? (
             <div className="flex justify-center py-1">
               <button
@@ -436,25 +322,56 @@ export function NativeChatMessageList({
               </button>
             </div>
           ) : null}
-          {messages.map((message) => (
-            <MessageRow
-              key={message.id}
-              message={message}
-              expandSignal={expandSignal}
-              // A missing transcript lifecycle is not evidence that the turn
-              // ended. Structured sessions and legacy live hooks still expose
-              // the authoritative session-level working state.
-              activeTurnIsWorking={
-                session.transcriptLifecycle
-                  ? session.transcriptLifecycle.state === 'working'
-                  : isWorking
-              }
-              onScrollMessageToTop={scrollMessageToTop}
-              onLinkClick={onLinkClick}
-              allowFileUriLinks={allowFileUriLinks}
-              deliveryFailed={failedDeliveryMessageIds?.has(message.id) === true}
+          {messages.map((message, index) => {
+            const turnKey = messages
+              .slice(0, index + 1)
+              .findLast((candidate) => candidate.role === 'user')?.id
+            const status =
+              index === latestUserIndex
+                ? turnStatuses.active
+                : turnStatuses.completedByTurn[message.id]
+            return (
+              <Fragment key={message.id}>
+                <MessageRow
+                  message={message}
+                  expandSignal={expandSignal}
+                  // A missing transcript lifecycle is not evidence that the turn
+                  // ended. Structured sessions and legacy live hooks still expose
+                  // the authoritative session-level working state.
+                  activeTurnIsWorking={
+                    session.transcriptLifecycle
+                      ? session.transcriptLifecycle.state === 'working'
+                      : isWorking
+                  }
+                  onScrollMessageToTop={scrollMessageToTop}
+                  onLinkClick={onLinkClick}
+                  allowFileUriLinks={allowFileUriLinks}
+                  deliveryFailed={failedDeliveryMessageIds?.has(message.id) === true}
+                  activityExpandOverride={turnKey ? expandedTurnIds.has(turnKey) : undefined}
+                />
+                {status && (index !== latestUserIndex || showTypingIndicator || !isWorking) ? (
+                  <NativeChatWorkingStatus
+                    startedAt={status.startedAt}
+                    thinking={status.thinking}
+                    workedSeconds={status.workedSeconds}
+                    expanded={turnKey ? expandedTurnIds.has(turnKey) : false}
+                    onToggleExpanded={
+                      status.workedSeconds != null && turnKey
+                        ? () => toggleExpandedTurn(turnKey)
+                        : undefined
+                    }
+                  />
+                ) : null}
+              </Fragment>
+            )
+          })}
+          {latestUserIndex === -1 && turnStatuses.active && showTypingIndicator ? (
+            <NativeChatWorkingStatus
+              startedAt={turnStatuses.active.startedAt}
+              thinking={turnStatuses.active.thinking}
+              workedSeconds={turnStatuses.active.workedSeconds}
             />
-          ))}
+          ) : null}
         </div>
       </div>
       {showJump ? (
