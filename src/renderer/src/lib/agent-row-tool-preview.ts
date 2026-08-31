@@ -1,7 +1,13 @@
 import type { AgentStatusEntry, AgentStatusState } from '../../../shared/agent-status-types'
 
-/** Row states, which add the renderer-only 'idle' to the hook-reported statuses. */
-export type AgentRowState = AgentStatusState | 'idle'
+/** Row states, which add renderer-only display states to hook-reported statuses. */
+export type AgentRowState =
+  | AgentStatusState
+  | 'idle'
+  | 'monitoring'
+  | 'interrupted'
+  | 'failed'
+  | 'permission'
 
 /**
  * States whose cached tool fields describe live work: 'working' names the tool the agent is
