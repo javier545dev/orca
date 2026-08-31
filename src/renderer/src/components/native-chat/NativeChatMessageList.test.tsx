@@ -84,6 +84,42 @@ describe('NativeChatMessageList assistant messages', () => {
     expect(document.querySelector('.text-destructive')).toBeNull()
   })
 
+  it('keeps bridge chats on the legacy activity chrome', () => {
+    render(
+      <NativeChatMessageList
+        session={{
+          ...session,
+          status: 'working',
+          messages: [
+            {
+              id: 'bridge-tool',
+              role: 'assistant',
+              blocks: [
+                {
+                  type: 'tool-call',
+                  name: 'shell',
+                  input: { command: 'sleep 5' },
+                  state: 'running'
+                }
+              ],
+              timestamp: 1,
+              source: 'transcript'
+            }
+          ]
+        }}
+        isWorking
+        expandSignal={false}
+        fontScale={1}
+        showTurnStatus={false}
+      />
+    )
+
+    expect(screen.queryByText('Thinking')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Toggle turn details' })).toBeNull()
+    expect(screen.queryByText('Running sleep 5')).toBeNull()
+    expect(document.querySelectorAll('.animate-bounce')).toHaveLength(3)
+  })
+
   it('keeps the current tool live when a stale completed lifecycle meets active hook state', () => {
     render(
       <NativeChatMessageList

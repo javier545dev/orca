@@ -142,6 +142,7 @@ export function NativeChatStructuredSession(props: {
             expandSignal={false}
             fontScale={fontScale.scale}
             workingStartedAt={null}
+            showTurnStatus={props.agent === 'codex'}
             onLinkClick={fileLinkClick}
             allowFileUriLinks={fileLinkClick !== undefined}
           />

@@ -24,9 +24,31 @@ import {
 
 export { ProviderFrameRow } from './NativeChatTranscriptChrome'
 
+function TypingIndicatorRow(): React.JSX.Element {
+  return (
+    <div
+      className="flex items-center justify-start"
+      aria-label={translate('components.native-chat.status.responding', 'Agent is responding')}
+      aria-live="polite"
+    >
+      <div className="flex h-8 items-center gap-1.5 text-muted-foreground">
+        {[0, 1, 2].map((i) => (
+          <span
+            key={i}
+            className="size-1.5 animate-bounce rounded-full bg-muted-foreground/70"
+            style={{ animationDelay: `${i * 160}ms` }}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function geometryOf(el: HTMLElement): ScrollGeometry {
   return { scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight }
 }
+
+const MAX_EXPANDED_TURNS = 128
 
 /** One message: its prose first, then a collapsible run folding all of the
  *  turn's tool activity. Monochrome per STYLEGUIDE: user prompts read as a
@@ -39,7 +61,8 @@ function MessageRow({
   onLinkClick,
   allowFileUriLinks = false,
   deliveryFailed = false,
-  activityExpandOverride
+  activityExpandOverride,
+  structuredActivityUi = true
 }: {
   message: NativeChatMessage
   expandSignal: boolean
@@ -50,6 +73,7 @@ function MessageRow({
   allowFileUriLinks?: boolean
   deliveryFailed?: boolean
   activityExpandOverride?: boolean
+  structuredActivityUi?: boolean
 }): React.JSX.Element | null {
   const rowRef = useRef<HTMLDivElement | null>(null)
   const { prose, tools } = useMemo(() => splitNativeChatBlocks(message.blocks), [message.blocks])
@@ -144,6 +168,7 @@ function MessageRow({
           expandSignal={expandSignal}
           expandOverride={activityExpandOverride}
           activeTurnIsWorking={activeTurnIsWorking}
+          structuredActivityUi={structuredActivityUi}
         />
       ) : null}
       {showControls ? (
@@ -165,7 +190,8 @@ export function NativeChatMessageList({
   onLinkClick,
   allowFileUriLinks = false,
   workingStartedAt,
-  failedDeliveryMessageIds
+  failedDeliveryMessageIds,
+  showTurnStatus = true
 }: {
   session: NativeChatLiveSession
   isWorking: boolean
@@ -177,6 +203,8 @@ export function NativeChatMessageList({
   onLinkClick?: CommentMarkdownLinkClickHandler
   allowFileUriLinks?: boolean
   failedDeliveryMessageIds?: ReadonlySet<string>
+  /** Turn timing/disclosure is available only on the structured Codex lane. */
+  showTurnStatus?: boolean
 }): React.JSX.Element {
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const contentRef = useRef<HTMLDivElement | null>(null)
@@ -189,6 +217,12 @@ export function NativeChatMessageList({
       if (next.has(turnKey)) {
         next.delete(turnKey)
       } else {
+        if (next.size >= MAX_EXPANDED_TURNS) {
+          const oldest = next.values().next().value
+          if (oldest) {
+            next.delete(oldest)
+          }
+        }
         next.add(turnKey)
       }
       return next
@@ -205,7 +239,9 @@ export function NativeChatMessageList({
     () => stripNoiseMessages(foldToolMessages(orderNativeChatMessages(session.messages))),
     [session.messages]
   )
-  const showTypingIndicator = shouldShowNativeChatTypingIndicator({ messages, isWorking })
+  const showTypingIndicator = showTurnStatus
+    ? isWorking
+    : shouldShowNativeChatTypingIndicator({ messages, isWorking })
   const latestUserIndex = messages.findLastIndex((message) => message.role === 'user')
   const currentTurnKey =
     latestUserIndex === -1 ? undefined : (messages[latestUserIndex]?.id ?? undefined)
@@ -223,8 +259,8 @@ export function NativeChatMessageList({
   const turnStatuses = useNativeChatTurnStatus({
     messages,
     latestUserIndex,
-    isWorking,
-    workingStartedAt
+    isWorking: showTurnStatus && isWorking,
+    workingStartedAt: showTurnStatus ? workingStartedAt : null
   })
 
   const prependAnchorRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null)
@@ -355,15 +391,20 @@ export function NativeChatMessageList({
                   // ended. Structured sessions and legacy live hooks still expose
                   // the authoritative session-level working state.
                   activeTurnIsWorking={
-                    isCurrentTurn && (isWorking || session.transcriptLifecycle?.state === 'working')
+                    showTurnStatus &&
+                    isCurrentTurn &&
+                    (isWorking || session.transcriptLifecycle?.state === 'working')
                   }
                   onScrollMessageToTop={scrollMessageToTop}
                   onLinkClick={onLinkClick}
                   allowFileUriLinks={allowFileUriLinks}
                   deliveryFailed={failedDeliveryMessageIds?.has(message.id) === true}
+                  structuredActivityUi={showTurnStatus}
                   activityExpandOverride={turnKey ? expandedTurnIds.has(turnKey) : undefined}
                 />
-                {status && (index !== latestUserIndex || showTypingIndicator || !isWorking) ? (
+                {showTurnStatus &&
+                status &&
+                (index !== latestUserIndex || showTypingIndicator || !isWorking) ? (
                   <NativeChatWorkingStatus
                     startedAt={status.startedAt}
                     thinking={status.thinking}
@@ -379,13 +420,17 @@ export function NativeChatMessageList({
               </Fragment>
             )
           })}
-          {latestUserIndex === -1 && turnStatuses.active && showTypingIndicator ? (
+          {showTurnStatus &&
+          latestUserIndex === -1 &&
+          turnStatuses.active &&
+          showTypingIndicator ? (
             <NativeChatWorkingStatus
               startedAt={turnStatuses.active.startedAt}
               thinking={turnStatuses.active.thinking}
               workedSeconds={turnStatuses.active.workedSeconds}
             />
           ) : null}
+          {!showTurnStatus && showTypingIndicator ? <TypingIndicatorRow /> : null}
         </div>
       </div>
       {showJump ? (

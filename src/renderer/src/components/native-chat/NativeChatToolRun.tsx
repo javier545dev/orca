@@ -158,7 +158,8 @@ export function NativeChatToolRun({
   blocks,
   expandSignal,
   activeTurnIsWorking,
-  expandOverride
+  expandOverride,
+  structuredActivityUi = true
 }: {
   blocks: NativeChatBlock[]
   /** Toolbar-driven desired open state. Each change re-syncs this run's state. */
@@ -167,6 +168,7 @@ export function NativeChatToolRun({
   expandOverride?: boolean
   /** Structured lifecycle state, when available, keeps orphaned running calls from spinning. */
   activeTurnIsWorking?: boolean
+  structuredActivityUi?: boolean
 }): React.JSX.Element | null {
   const [open, setOpen] = useState(expandOverride ?? expandSignal)
   // Re-sync when the global toolbar toggle flips.
@@ -175,11 +177,13 @@ export function NativeChatToolRun({
   const callCount = countToolCalls(blocks) || blocks.length
   const summary = summarizeToolRun(blocks)
   const calls = blocks.filter(isToolCallBlock)
-  const activeCalls = calls.filter(
-    (call) =>
-      (call.state === 'running' || (call.state == null && activeTurnIsWorking === true)) &&
-      activeTurnIsWorking !== false
-  )
+  const activeCalls = structuredActivityUi
+    ? calls.filter(
+        (call) =>
+          (call.state === 'running' || (call.state == null && activeTurnIsWorking === true)) &&
+          activeTurnIsWorking !== false
+      )
+    : []
   const latestActiveCall = activeCalls.at(-1)
   const isSettled = latestActiveCall == null
   // The turn caret opens the activity group, while each child tool remains
@@ -199,7 +203,12 @@ export function NativeChatToolRun({
   // Completed turn activity belongs behind the turn-status disclosure. Keeping
   // the grouped row visible here made a failed child command look like the
   // whole response was still running (or had failed) even while collapsed.
-  if (expandOverride === false && isSettled && activeTurnIsWorking === false) {
+  if (
+    structuredActivityUi &&
+    expandOverride === false &&
+    isSettled &&
+    activeTurnIsWorking === false
+  ) {
     return null
   }
 
@@ -230,9 +239,11 @@ export function NativeChatToolRun({
           className="group flex min-h-6 w-full items-center gap-1.5 py-0.5 text-left"
           aria-expanded={open}
         >
-          <span className="flex size-6 shrink-0 items-center justify-center text-muted-foreground">
-            <Check className="size-3.5" />
-          </span>
+          {structuredActivityUi ? (
+            <span className="flex size-6 shrink-0 items-center justify-center text-muted-foreground">
+              <Check className="size-3.5" />
+            </span>
+          ) : null}
           <span className="shrink-0 font-mono text-[11px] font-bold text-muted-foreground transition-colors group-hover:text-foreground/80">
             {callCount}×
           </span>

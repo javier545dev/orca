@@ -28,25 +28,25 @@ describe('shouldShowNativeChatTypingIndicator', () => {
     ).toBe(true)
   })
 
-  it('stays visible when the structured reply row arrives before working clears', () => {
+  it('hides as soon as the structured reply row arrives, before working clears', () => {
     expect(
       shouldShowNativeChatTypingIndicator({
         messages: [message('u1', 'user'), message('orca-item', 'assistant')],
         isWorking: true
       })
-    ).toBe(true)
+    ).toBe(false)
   })
 
-  it('stays visible behind the PTY streaming bubble', () => {
+  it('hides behind the PTY streaming bubble', () => {
     expect(
       shouldShowNativeChatTypingIndicator({
         messages: [message('u1', 'user'), message(NATIVE_CHAT_STREAMING_ID, 'assistant')],
         isWorking: true
       })
-    ).toBe(true)
+    ).toBe(false)
   })
 
-  it('stays visible when a system row interleaves mid-turn', () => {
+  it('does not flicker back on when a system row interleaves mid-turn', () => {
     expect(
       shouldShowNativeChatTypingIndicator({
         messages: [
@@ -56,7 +56,7 @@ describe('shouldShowNativeChatTypingIndicator', () => {
         ],
         isWorking: true
       })
-    ).toBe(true)
+    ).toBe(false)
   })
 
   it('shows again for the next send even though an earlier turn replied', () => {
@@ -142,9 +142,9 @@ describe('with rows projected from the structured journal', () => {
     expect(shouldShowNativeChatTypingIndicator({ messages, isWorking: true })).toBe(true)
   })
 
-  it('stays visible once prose is the newest row', () => {
+  it('hides once prose is the newest row', () => {
     const messages = projectStructuredItemsToNativeChat([toolCallItem(1), assistantTextItem(2)])
-    expect(shouldShowNativeChatTypingIndicator({ messages, isWorking: true })).toBe(true)
+    expect(shouldShowNativeChatTypingIndicator({ messages, isWorking: true })).toBe(false)
   })
 
   it('stays hidden when the turn is not working, command row or not', () => {
