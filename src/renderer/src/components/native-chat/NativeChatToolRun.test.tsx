@@ -106,6 +106,18 @@ describe('NativeChatToolRun', () => {
     expect(container.querySelector('.animate-spin')).toBeNull()
   })
 
+  it('treats legacy tool calls without lifecycle state as active while the turn works', () => {
+    render(
+      <NativeChatToolRun
+        blocks={[{ type: 'tool-call', name: 'shell', input: { command: 'sleep 5' } }]}
+        expandSignal={false}
+        activeTurnIsWorking
+      />
+    )
+
+    expect(screen.getByText('Running sleep 5')).toBeInTheDocument()
+  })
+
   it('keeps a completed tool payload collapsed until the run is expanded', () => {
     const blocks: NativeChatBlock[] = [
       {

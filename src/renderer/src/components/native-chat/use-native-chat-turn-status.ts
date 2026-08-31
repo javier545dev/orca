@@ -42,37 +42,61 @@ export function useNativeChatTurnStatus({
   const [timingByTurn, setTimingByTurn] = useState<Record<string, NativeChatTurnTiming>>({})
 
   useLayoutEffect(() => {
+    const validTurnKeys = new Set(
+      messages.filter((message) => message.role === 'user').map((message) => message.id)
+    )
+    validTurnKeys.add(activeTurnKey)
     if (isWorking) {
       setTimingByTurn((current) => {
-        const timing = current[activeTurnKey]
+        let retained = current
+        for (const turnKey of Object.keys(current)) {
+          if (!validTurnKeys.has(turnKey)) {
+            if (retained === current) {
+              retained = { ...current }
+            }
+            delete retained[turnKey]
+          }
+        }
+        const timing = retained[activeTurnKey]
         const startedAt =
           workingStartedAt ??
           (timing?.workedSeconds == null && timing ? timing.startedAt : Date.now())
         if (timing?.startedAt === startedAt && timing.workedSeconds == null) {
-          return current
+          return retained
         }
-        return { ...current, [activeTurnKey]: { startedAt, workedSeconds: null } }
+        const next = { ...retained }
+        next[activeTurnKey] = { startedAt, workedSeconds: null }
+        return next
       })
       return
     }
     setTimingByTurn((current) => {
-      const timing = current[activeTurnKey]
+      let retained = current
+      for (const turnKey of Object.keys(current)) {
+        if (!validTurnKeys.has(turnKey)) {
+          if (retained === current) {
+            retained = { ...current }
+          }
+          delete retained[turnKey]
+        }
+      }
+      const timing = retained[activeTurnKey]
       if (timing?.workedSeconds != null) {
-        return current
+        return retained
       }
       const startedAt = timing?.startedAt ?? workingStartedAt
       if (startedAt == null) {
-        return current
+        return retained
       }
       return {
-        ...current,
+        ...retained,
         [activeTurnKey]: {
           startedAt,
           workedSeconds: Math.max(0, Math.floor((Date.now() - startedAt) / 1000))
         }
       }
     })
-  }, [activeTurnKey, isWorking, workingStartedAt])
+  }, [activeTurnKey, isWorking, messages, workingStartedAt])
 
   const currentTiming = timingByTurn[activeTurnKey]
   const completedByTurn = Object.fromEntries(

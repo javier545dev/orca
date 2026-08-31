@@ -84,6 +84,39 @@ describe('NativeChatMessageList assistant messages', () => {
     expect(document.querySelector('.text-destructive')).toBeNull()
   })
 
+  it('keeps the current tool live when a stale completed lifecycle meets active hook state', () => {
+    render(
+      <NativeChatMessageList
+        session={{
+          ...session,
+          status: 'working',
+          transcriptLifecycle: { state: 'completed', turnId: 'old-turn', timestamp: 1 },
+          messages: [
+            {
+              id: 'current-tool',
+              role: 'assistant',
+              blocks: [
+                {
+                  type: 'tool-call',
+                  name: 'shell',
+                  input: { command: 'sleep 5' },
+                  state: 'running'
+                }
+              ],
+              timestamp: 2,
+              source: 'transcript'
+            }
+          ]
+        }}
+        isWorking
+        expandSignal={false}
+        fontScale={1}
+      />
+    )
+
+    expect(screen.getByText('Running sleep 5')).toBeInTheDocument()
+  })
+
   it('shows a stable thinking status directly below the user message', () => {
     const { container } = render(
       <NativeChatMessageList

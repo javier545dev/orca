@@ -176,7 +176,9 @@ export function NativeChatToolRun({
   const summary = summarizeToolRun(blocks)
   const calls = blocks.filter(isToolCallBlock)
   const activeCalls = calls.filter(
-    (call) => call.state === 'running' && activeTurnIsWorking !== false
+    (call) =>
+      (call.state === 'running' || (call.state == null && activeTurnIsWorking === true)) &&
+      activeTurnIsWorking !== false
   )
   const latestActiveCall = activeCalls.at(-1)
   const isSettled = latestActiveCall == null
@@ -248,19 +250,26 @@ export function NativeChatToolRun({
       )}
       {open ? (
         <div className="mt-1">
-          {blocks.map((block) => (
-            <ToolLine
-              key={
+          {(() => {
+            const seen = new Map<string, number>()
+            return blocks.map((block) => {
+              const signature =
                 block.type === 'tool-call'
-                  ? `${block.name}:${JSON.stringify(block.input)}`
+                  ? `${block.type}:${block.name}:${JSON.stringify(block.input)}`
                   : block.type === 'tool-result'
                     ? `${block.type}:${block.output}`
-                    : block.type
-              }
-              block={block}
-              initiallyExpanded={expandToolLines}
-            />
-          ))}
+                    : `${block.type}`
+              const occurrence = seen.get(signature) ?? 0
+              seen.set(signature, occurrence + 1)
+              return (
+                <ToolLine
+                  key={`${signature}:${occurrence}`}
+                  block={block}
+                  initiallyExpanded={expandToolLines}
+                />
+              )
+            })
+          })()}
         </div>
       ) : null}
     </div>

@@ -207,6 +207,19 @@ export function NativeChatMessageList({
   )
   const showTypingIndicator = shouldShowNativeChatTypingIndicator({ messages, isWorking })
   const latestUserIndex = messages.findLastIndex((message) => message.role === 'user')
+  const currentTurnKey =
+    latestUserIndex === -1 ? undefined : (messages[latestUserIndex]?.id ?? undefined)
+  // Resolve each row's turn boundary once. Prefix slice/findLast in the render
+  // loop becomes quadratic for long transcripts.
+  const turnKeys = useMemo(() => {
+    let currentTurnKey: string | undefined
+    return messages.map((message) => {
+      if (message.role === 'user') {
+        currentTurnKey = message.id
+      }
+      return currentTurnKey
+    })
+  }, [messages])
   const turnStatuses = useNativeChatTurnStatus({
     messages,
     latestUserIndex,
@@ -323,13 +336,16 @@ export function NativeChatMessageList({
             </div>
           ) : null}
           {messages.map((message, index) => {
-            const turnKey = messages
-              .slice(0, index + 1)
-              .findLast((candidate) => candidate.role === 'user')?.id
+            const turnKey = turnKeys[index]
+            const isCurrentTurn = currentTurnKey
+              ? turnKey === currentTurnKey
+              : turnKey === undefined
             const status =
               index === latestUserIndex
                 ? turnStatuses.active
-                : turnStatuses.completedByTurn[message.id]
+                : message.role === 'user' && turnKey
+                  ? turnStatuses.completedByTurn[turnKey]
+                  : undefined
             return (
               <Fragment key={message.id}>
                 <MessageRow
@@ -339,9 +355,7 @@ export function NativeChatMessageList({
                   // ended. Structured sessions and legacy live hooks still expose
                   // the authoritative session-level working state.
                   activeTurnIsWorking={
-                    session.transcriptLifecycle
-                      ? session.transcriptLifecycle.state === 'working'
-                      : isWorking
+                    isCurrentTurn && (isWorking || session.transcriptLifecycle?.state === 'working')
                   }
                   onScrollMessageToTop={scrollMessageToTop}
                   onLinkClick={onLinkClick}
