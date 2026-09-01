@@ -1376,6 +1376,12 @@ export function buildMobileSessionTabSnapshots(
 
   const snapshots: RuntimeMobileSessionTabsSnapshot[] = []
   for (const worktreeId of worktreeIds) {
+    // A bare id is not enough to choose an instance when local and remote hosts
+    // publish the same worktree; fail closed rather than attaching the wrong host.
+    if (getIndexedWorktreesById(state.worktreesByRepo ?? {}, worktreeId).length > 1) {
+      mobileSessionSnapshotCacheByWorktree.delete(worktreeId)
+      continue
+    }
     const workspaceScope = parseWorkspaceKey(worktreeId)
     if (
       workspaceScope?.type === 'folder' &&
