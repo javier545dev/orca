@@ -3,7 +3,7 @@ import { toast } from 'sonner'
 import { resolveGroupTabFromVisibleId } from '@/components/tab-group/tab-group-visible-id'
 import { getConnectionId } from '@/lib/connection-context'
 import { createUntitledMarkdownFileWithTemplateSelection } from '@/lib/create-untitled-markdown'
-import { detectLanguage } from '@/lib/language-detect'
+import { openMarkdownDocumentInFloatingWorkspace } from '@/lib/open-markdown-in-floating-workspace'
 import { extractIpcErrorMessage } from '@/lib/ipc-error'
 import { focusTerminalTabSurface } from '@/lib/focus-terminal-tab-surface'
 import { translate } from '@/i18n/i18n'
@@ -119,21 +119,9 @@ export function useFloatingTerminalCreateActions({
         if (!document) {
           return
         }
-        openFile(
-          {
-            filePath: document.filePath,
-            relativePath: document.relativePath,
-            worktreeId: FLOATING_TERMINAL_WORKTREE_ID,
-            language: detectLanguage(document.relativePath),
-            mode: 'edit',
-            runtimeEnvironmentId: null
-          },
-          {
-            preview: false,
-            targetGroupId: activeGroup?.id,
-            suppressActiveRuntimeFallback: true
-          }
-        )
+        openMarkdownDocumentInFloatingWorkspace(openFile, document, {
+          targetGroupId: activeGroup?.id
+        })
       } catch (error) {
         toast.error(extractIpcErrorMessage(error, 'Failed to open markdown file.'))
       }

@@ -3823,6 +3823,14 @@ const api = {
     },
     consumePendingSkillShare: (): Promise<string | null> =>
       ipcRenderer.invoke('ui:consumePendingSkillShare'),
+    onOpenMarkdownFiles: (callback: (documents: MarkdownDocument[]) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, documents: MarkdownDocument[]): void =>
+        callback(documents)
+      ipcRenderer.on('ui:openMarkdownFiles', listener)
+      return () => ipcRenderer.removeListener('ui:openMarkdownFiles', listener)
+    },
+    consumePendingMarkdownFileOpens: (): Promise<MarkdownDocument[]> =>
+      ipcRenderer.invoke('ui:consumePendingMarkdownFileOpens'),
     onOpenSetupGuide: (callback: () => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent) => callback()
       ipcRenderer.on('ui:openSetupGuide', listener)

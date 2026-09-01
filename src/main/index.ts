@@ -225,6 +225,10 @@ import { settledDiffCache } from './git/source-control/git-read-cache-invalidati
 import { parseSkillShareId } from '../shared/skill-share-link'
 import { SkillShareDeepLinkState } from './startup/skill-share-deep-link-state'
 import {
+  OsOpenedMarkdownFileState,
+  resolveOpenedMarkdownDocuments
+} from './startup/os-opened-markdown-files'
+import {
   isStartupDiagnosticsEnabled,
   logStartupDiagnostic,
   logStartupMilestone
@@ -475,6 +479,8 @@ const recoveryReloadInFlight = createWebContentsTimedFlag()
 // Why: a tray "Settings…" click can precede the renderer's ui:openSettings listener; it pulls this one-shot on mount.
 const pendingOpenSettings = createWebContentsTimedFlag()
 const skillShareDeepLinks = new SkillShareDeepLinkState()
+// Why: a Finder/Explorer "Open With" can land before any window exists; the renderer pulls this buffer on mount.
+const osOpenedMarkdownFiles = new OsOpenedMarkdownFileState()
 let firstWindowStartupServicesReady: Promise<void> = Promise.resolve()
 let managedWslCliReconciliationReady: Promise<void> = Promise.resolve()
 let managedWslCliStartupBarrierReady: Promise<void> = Promise.resolve()
@@ -812,11 +818,40 @@ function requestDesktopActivation(argv: readonly string[] = []): void {
   skillShareDeepLinks.capture(argv, (shareId) => {
     mainWindow?.webContents.send('ui:openSkillShare', shareId)
   })
+  osOpenedMarkdownFiles.capture(argv, publishOsOpenedMarkdownFiles)
   // Why: a duplicate `orca serve` must not drag a headless server into opening a desktop window (#11935).
   if (!shouldActivateDesktopForSecondInstance(argv)) {
     return
   }
   desktopActivationGate.requestActivation()
+}
+
+/** Hands buffered OS-opened markdown paths to a live renderer; a miss leaves them for its next pull. */
+function publishOsOpenedMarkdownFiles(): void {
+  const targetWindow = mainWindow
+  if (!targetWindow || targetWindow.isDestroyed()) {
+    return
+  }
+  // Why consumed before the await: a renderer pull racing this resolve must not take the same
+  // batch again. The restore() calls hand it back if the window dies mid-resolve.
+  const filePaths = osOpenedMarkdownFiles.consume()
+  if (filePaths.length === 0) {
+    return
+  }
+  void resolveOpenedMarkdownDocuments(filePaths)
+    .then((documents) => {
+      if (targetWindow.isDestroyed() || targetWindow.webContents.isDestroyed()) {
+        osOpenedMarkdownFiles.restore(filePaths)
+        return
+      }
+      if (documents.length > 0) {
+        targetWindow.webContents.send('ui:openMarkdownFiles', documents)
+      }
+    })
+    .catch((error) => {
+      osOpenedMarkdownFiles.restore(filePaths)
+      console.warn('[os-open] Failed to resolve OS-opened markdown files:', error)
+    })
 }
 
 app.on('open-url', (event, url) => {
@@ -827,7 +862,23 @@ app.on('open-url', (event, url) => {
   requestDesktopActivation([url])
 })
 
+// Why: macOS delivers "Open With" as open-file, often before `ready`, and only to a handler that
+// claims the event. Non-markdown paths stay unclaimed so the OS default handler still wins.
+app.on('open-file', (event, filePath) => {
+  if (!osOpenedMarkdownFiles.captureFilePaths([filePath], publishOsOpenedMarkdownFiles)) {
+    return
+  }
+  event.preventDefault()
+  // Why gated on isReady: pre-ready the cold-start window is already on its way, and activating
+  // the gate here would try to open one before Electron can.
+  if (app.isReady()) {
+    requestDesktopActivation()
+  }
+})
+
 skillShareDeepLinks.capture(process.argv)
+// Why no publish: nothing is listening this early, so the first renderer pulls these on mount.
+osOpenedMarkdownFiles.capture(process.argv)
 
 const handleMacAppActivation = createMacAppActivationHandler({
   getWindow: () => mainWindow,
@@ -1076,6 +1127,12 @@ ipcMain.handle('ui:consumePendingOpenSettings', (event) =>
 ipcMain.handle('ui:consumePendingSkillShare', () => {
   return skillShareDeepLinks.consume()
 })
+
+// Why: the renderer pulls this once its ui:openMarkdownFiles listener attaches, so a cold-start
+// "Open With" queued before mount still opens.
+ipcMain.handle('ui:consumePendingMarkdownFileOpens', () =>
+  resolveOpenedMarkdownDocuments(osOpenedMarkdownFiles.consume())
+)
 
 ipcMain.handle(
   'app:startupDiagnostic',
