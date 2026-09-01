@@ -98,10 +98,11 @@ describe('markdownPathsFromArguments', () => {
     ])
   })
 
-  it('accepts the file:// URIs Linux delivers through the desktop entry %U field code', () => {
-    // Why: electron-builder appends `%U` to the generated Exec= line, and %U means URLs -
-    // GIO hands over `file:///home/me/a.md`, never a bare path. Dropping these would make the
-    // feature silently do nothing on every Linux desktop.
+  it('accepts a file:// URI, which the desktop entry %U field code permits', () => {
+    // Why defensive rather than load-bearing: GLib decodes a local file:// URI to a plain
+    // path before spawning (measured on Ubuntu 24.04), so Linux hits the plain-path branch
+    // today. The %U spec still allows a URI, and a launcher that passes one literally would
+    // otherwise be dropped without a trace.
     expect(
       markdownPathsFromArguments(
         ['file:///home/me/notes/a.md', 'file:///home/me/notes/b.txt'],

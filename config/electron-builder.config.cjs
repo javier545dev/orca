@@ -487,7 +487,8 @@ module.exports = {
     // Why mimeTypes and not fileAssociations: shared-mime-info already maps *.md/*.markdown to
     // text/markdown, so reusing that type puts Orca in the Open With list without shipping a glob
     // override. A desktop entry's MimeType only adds a handler - mimeapps.list still owns the
-    // default. (.mdx is covered only where the distro's mime database maps it.)
+    // default. .mdx is deliberately absent: Ubuntu 24.04's mime database maps it to
+    // application/x-genesis-32x-rom, so claiming it here would need a glob override.
     mimeTypes: ['text/markdown'],
     // Why: Ubuntu desktop ships GNOME Orca as the `orca` package and /usr/bin/orca.
     // The Linux installer should not claim those system package/file names.

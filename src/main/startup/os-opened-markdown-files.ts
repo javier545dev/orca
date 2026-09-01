@@ -13,9 +13,12 @@ export const MAX_PENDING_OS_OPENED_MARKDOWN_FILES = 32
 /**
  * Resolves one argv entry to a local absolute path, or null if it is not one.
  *
- * Why file:// is accepted: electron-builder appends the `%U` field code to the generated
- * Linux `Exec=` line, and `%U` means "URLs" — GIO hands Orca `file:///home/me/a.md`, not a
- * path. macOS (open-file) and the Windows shell (`%1`) pass plain paths.
+ * Why file:// is accepted defensively: electron-builder appends the `%U` field code to the
+ * generated Linux `Exec=` line, and `%U` is specified as "URLs". GLib turns out to decode a
+ * local `file://` URI back to a plain path before spawning (measured on Ubuntu 24.04, via
+ * the same `launch_uris` call a file manager makes), so the branch below is not what fires
+ * there today — but the spec permits a URI, and a launcher that honours it literally would
+ * otherwise be silently dropped. macOS `open-file` and the Windows shell `%1` pass paths.
  */
 function localPathFromArgument(argument: string, platform: NodeJS.Platform): string | null {
   const pathApi = platform === 'win32' ? path.win32 : path.posix
