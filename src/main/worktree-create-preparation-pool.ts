@@ -64,17 +64,36 @@ function expireEntry(entry: PreparationEntry): void {
   void discardEntry(entry)
 }
 
-function enforcePreparationLimit(): void {
+/**
+ * Frees a slot for an incoming preparation, preferring one the same workspace already owns.
+ *
+ * The cap is a disk bound — a prepared checkout is a full tree, ~200 MB of tracked content in the
+ * repo this was measured against — so it stays small. But flipping through the composer's base
+ * picker arms several preparations for one repo, and a plain oldest-first eviction let that churn
+ * throw away another project's warm checkout, which is a structural miss for anyone working across
+ * several repos. Evict the incoming workspace's own oldest entry first; only reach across
+ * workspaces when this one holds none.
+ */
+function enforcePreparationLimit(
+  repoPathKey: string,
+  workspaceRootKey: string,
+  wslDistro: string
+): void {
   while (preparations.size >= WORKTREE_CREATE_PREPARATION_LIMIT) {
-    const oldest = [...preparations.values()].sort(
-      (left, right) => left.createdAt - right.createdAt
-    )[0]
-    if (!oldest) {
+    const byAge = [...preparations.values()].sort((left, right) => left.createdAt - right.createdAt)
+    const victim =
+      byAge.find(
+        (entry) =>
+          entry.repoPathKey === repoPathKey &&
+          entry.workspaceRootKey === workspaceRootKey &&
+          entry.wslDistro === wslDistro
+      ) ?? byAge[0]
+    if (!victim) {
       return
     }
-    preparations.delete(oldest.key)
-    clearTimeout(oldest.expiration)
-    void discardEntry(oldest)
+    preparations.delete(victim.key)
+    clearTimeout(victim.expiration)
+    void discardEntry(victim)
   }
 }
 
@@ -111,7 +130,7 @@ export function startPreparation({
   const workspaceRootKey = preparationPathKey(workspaceRoot)
   const wslDistro = options.wslDistro ?? ''
   const key = preparationEntryKey(repoPathKey, workspaceRootKey, canonicalBase, wslDistro)
-  enforcePreparationLimit()
+  enforcePreparationLimit(repoPathKey, workspaceRootKey, wslDistro)
   const preparationId = `${process.pid}-${randomUUID()}`
   const lockReason = createWorktreePreparationLockReason(preparationId)
   const preparationRoot = pathOps(workspaceRoot).join(

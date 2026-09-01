@@ -35,7 +35,12 @@ export type WorktreeCreateTimingPhase = {
  *  be derived from a branch name, a ref, or a path. */
 export type PreparedCheckoutMissReason =
   | 'none_armed'
+  /** Preparations exist, but none for this repo — it was never warmed, or the pool's size cap
+   *  evicted it for another repo. Distinguished from `none_armed` because it is the signal that
+   *  the cap is thrashing for a multi-project user. */
+  | 'repo_mismatch'
   | 'base_mismatch'
+  | 'retarget_too_divergent'
   | 'workspace_root_mismatch'
   | 'wsl_distro_mismatch'
   | 'prepare_failed'

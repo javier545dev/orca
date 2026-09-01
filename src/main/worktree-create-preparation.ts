@@ -6,6 +6,7 @@ import { isFolderRepo } from '../shared/repo-kind'
 import { isWindowsAbsolutePathLike } from '../shared/cross-platform-path'
 import type { PreparedCheckoutMissReason } from '../shared/worktree/create-types'
 import type { AddWorktreeOptions, AddWorktreeResult } from './git/worktree'
+import { isWithinRetargetDivergence } from './git/worktree-base-divergence'
 import { resolveLocalWorktreeBaseRef } from './git/worktree-base-ref-probe'
 import { preparationPathKey, selectPreparationForCreate } from './worktree-create-preparation-claim'
 import {
@@ -127,6 +128,29 @@ async function claimPreparedWorktree(
     return {
       status: 'miss',
       reason: selection.kind === 'miss' ? selection.reason : 'base_mismatch'
+    }
+  }
+  if (selection.kind === 'retarget') {
+    const candidate = selection.candidate
+    const { canonicalBase } = selection
+    if (
+      !(await isWithinRetargetDivergence(
+        args.repoPath,
+        candidate.canonicalBase,
+        canonicalBase,
+        options.wslDistro ? { wslDistro: options.wslDistro } : {}
+      ))
+    ) {
+      return { status: 'miss', reason: 'retarget_too_divergent' }
+    }
+    // Re-select after the walk: the pool may have gained an exact match or lost this entry. A
+    // different retarget candidate is left for the next create rather than claimed unverified.
+    selection = selectPreparationForCreate(listPreparations(), { ...request, canonicalBase })
+    if (selection.kind === 'miss' || selection.kind === 'needs-canonical-base') {
+      return { status: 'miss', reason: 'base_mismatch' }
+    }
+    if (selection.kind === 'retarget' && selection.candidate !== candidate) {
+      return { status: 'miss', reason: 'base_mismatch' }
     }
   }
   const entry = selection.candidate

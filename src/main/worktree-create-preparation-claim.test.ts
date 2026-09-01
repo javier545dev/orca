@@ -114,9 +114,10 @@ describe('selectPreparationForCreate', () => {
       kind: 'miss',
       reason: 'none_armed'
     })
+    // Something is warm, just not for this repo — the shape of a size-cap eviction.
     expect(
       selectPreparationForCreate([candidate()], request({ repoPathKey: '/other-repo' }))
-    ).toEqual({ kind: 'miss', reason: 'none_armed' })
+    ).toEqual({ kind: 'miss', reason: 'repo_mismatch' })
     expect(selectPreparationForCreate([candidate()], request({ wslDistro: 'Ubuntu' }))).toEqual({
       kind: 'miss',
       reason: 'wsl_distro_mismatch'

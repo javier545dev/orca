@@ -7,7 +7,11 @@ import type { PreparedCheckoutMissReason } from '../shared/worktree/create-types
  *  (sparse/existing-branch skips) or by the finalize step. */
 export type PreparationSelectionMissReason = Extract<
   PreparedCheckoutMissReason,
-  'none_armed' | 'base_mismatch' | 'workspace_root_mismatch' | 'wsl_distro_mismatch'
+  | 'none_armed'
+  | 'repo_mismatch'
+  | 'base_mismatch'
+  | 'workspace_root_mismatch'
+  | 'wsl_distro_mismatch'
 >
 
 export type PreparationCandidate = {
@@ -79,9 +83,13 @@ export function selectPreparationForCreate<T extends PreparationCandidate>(
   candidates: readonly T[],
   request: PreparationRequest
 ): PreparationSelection<T> {
+  if (candidates.length === 0) {
+    return { kind: 'miss', reason: 'none_armed' }
+  }
   const sameRepo = candidates.filter((candidate) => candidate.repoPathKey === request.repoPathKey)
   if (sameRepo.length === 0) {
-    return { kind: 'miss', reason: 'none_armed' }
+    // Separate from `none_armed`: this is what a size-cap eviction looks like from the create side.
+    return { kind: 'miss', reason: 'repo_mismatch' }
   }
   // Distro before root: the distro decides which filesystem the root is even on.
   const sameHost = sameRepo.filter((candidate) => candidate.wslDistro === request.wslDistro)
