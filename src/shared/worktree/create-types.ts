@@ -41,6 +41,12 @@ export type PreparedCheckoutMissReason =
   | 'repo_mismatch'
   | 'base_mismatch'
   | 'retarget_too_divergent'
+  /** The drift check returned no answer. Distinct from `retarget_too_divergent` because that one
+   *  is the bound working as intended, while this one means a possibly cheap retarget was skipped
+   *  anyway. Deliberately a mixed bucket — a blown deadline, a cancelled create, and an ordinary
+   *  Git failure such as a missing ref all land here — so treat a rise as "look at why", not as a
+   *  direct readout of the budget being too small. */
+  | 'retarget_unverifiable'
   | 'workspace_root_mismatch'
   | 'wsl_distro_mismatch'
   | 'prepare_failed'

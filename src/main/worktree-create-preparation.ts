@@ -6,7 +6,7 @@ import { isFolderRepo } from '../shared/repo-kind'
 import { isWindowsAbsolutePathLike } from '../shared/cross-platform-path'
 import type { PreparedCheckoutMissReason } from '../shared/worktree/create-types'
 import type { AddWorktreeOptions, AddWorktreeResult } from './git/worktree'
-import { isWithinRetargetDivergence } from './git/worktree-base-divergence'
+import { measureRetargetDivergence } from './git/worktree-base-divergence'
 import { resolveLocalWorktreeBaseRef } from './git/worktree-base-ref-probe'
 import { preparationPathKey, selectPreparationForCreate } from './worktree-create-preparation-claim'
 import {
@@ -133,15 +133,21 @@ async function claimPreparedWorktree(
   if (selection.kind === 'retarget') {
     const candidate = selection.candidate
     const { canonicalBase } = selection
-    if (
-      !(await isWithinRetargetDivergence(
-        args.repoPath,
-        candidate.canonicalBase,
-        canonicalBase,
-        options.wslDistro ? { wslDistro: options.wslDistro } : {}
-      ))
-    ) {
-      return { status: 'miss', reason: 'retarget_too_divergent' }
+    const divergence = await measureRetargetDivergence(
+      args.repoPath,
+      candidate.canonicalBase,
+      canonicalBase,
+      {
+        ...(options.wslDistro ? { wslDistro: options.wslDistro } : {}),
+        // Why forward it: a cancelled create must stop these probes now, not at the deadline.
+        ...(options.signal ? { signal: options.signal } : {})
+      }
+    )
+    if (divergence !== 'within') {
+      return {
+        status: 'miss',
+        reason: divergence === 'exceeded' ? 'retarget_too_divergent' : 'retarget_unverifiable'
+      }
     }
     // Re-select after the walk: the pool may have gained an exact match or lost this entry. A
     // different retarget candidate is left for the next create rather than claimed unverified.

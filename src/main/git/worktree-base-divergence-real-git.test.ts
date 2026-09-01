@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
-  isWithinRetargetDivergence,
+  measureRetargetDivergence,
   RETARGET_MAX_COMMIT_DIVERGENCE
 } from './worktree-base-divergence'
 
@@ -42,7 +42,7 @@ afterEach(async () => {
   await Promise.all(tempRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
 })
 
-describe('isWithinRetargetDivergence with real Git', () => {
+describe('measureRetargetDivergence with real Git', () => {
   it('allows the drift between a local branch and its remote-tracking copy', async () => {
     const repoPath = await createRepo()
     git(repoPath, ['update-ref', 'refs/remotes/origin/main', 'HEAD'])
@@ -51,8 +51,8 @@ describe('isWithinRetargetDivergence with real Git', () => {
     git(repoPath, ['reset', '--hard', '--quiet', 'HEAD~3'])
 
     await expect(
-      isWithinRetargetDivergence(repoPath, 'refs/heads/main', 'refs/remotes/origin/main')
-    ).resolves.toBe(true)
+      measureRetargetDivergence(repoPath, 'refs/heads/main', 'refs/remotes/origin/main')
+    ).resolves.toBe('within')
   })
 
   it('counts drift in both directions', async () => {
@@ -65,8 +65,8 @@ describe('isWithinRetargetDivergence with real Git', () => {
 
     // 100 ahead + 1 behind is over the cap even though neither side alone exceeds it.
     await expect(
-      isWithinRetargetDivergence(repoPath, 'refs/heads/main', 'refs/remotes/origin/main')
-    ).resolves.toBe(false)
+      measureRetargetDivergence(repoPath, 'refs/heads/main', 'refs/remotes/origin/main')
+    ).resolves.toBe('exceeded')
   })
 
   it('refuses a base that has drifted past the cap', async () => {
@@ -75,8 +75,8 @@ describe('isWithinRetargetDivergence with real Git', () => {
     commitEmpty(repoPath, RETARGET_MAX_COMMIT_DIVERGENCE + 1)
 
     await expect(
-      isWithinRetargetDivergence(repoPath, 'refs/remotes/origin/main', 'refs/heads/main')
-    ).resolves.toBe(false)
+      measureRetargetDivergence(repoPath, 'refs/remotes/origin/main', 'refs/heads/main')
+    ).resolves.toBe('exceeded')
   })
 
   it('refuses unrelated histories, which share no commits at all', async () => {
@@ -85,15 +85,15 @@ describe('isWithinRetargetDivergence with real Git', () => {
     git(repoPath, ['commit', '--quiet', '--allow-empty', '-m', 'unrelated root'])
 
     await expect(
-      isWithinRetargetDivergence(repoPath, 'refs/heads/main', 'refs/heads/unrelated')
-    ).resolves.toBe(false)
+      measureRetargetDivergence(repoPath, 'refs/heads/main', 'refs/heads/unrelated')
+    ).resolves.toBe('exceeded')
   })
 
-  it('fails closed when a ref cannot be read', async () => {
+  it('reports an unreadable ref as unverifiable, not as excess drift', async () => {
     const repoPath = await createRepo()
 
     await expect(
-      isWithinRetargetDivergence(repoPath, 'refs/heads/main', 'refs/heads/missing')
-    ).resolves.toBe(false)
+      measureRetargetDivergence(repoPath, 'refs/heads/main', 'refs/heads/missing')
+    ).resolves.toBe('unknown')
   })
 })

@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
   computeWorkspaceRoot: vi.fn(),
   computeWorkspaceRootAsync: vi.fn(),
   resolveBaseRef: vi.fn(),
-  withinDivergence: vi.fn()
+  measureDivergence: vi.fn()
 }))
 
 vi.mock('node:fs/promises', () => ({ mkdir: mocks.mkdir }))
@@ -30,7 +30,7 @@ vi.mock('./git/worktree-base-ref-probe', () => ({
   resolveLocalWorktreeBaseRef: mocks.resolveBaseRef
 }))
 vi.mock('./git/worktree-base-divergence', () => ({
-  isWithinRetargetDivergence: mocks.withinDivergence
+  measureRetargetDivergence: mocks.measureDivergence
 }))
 vi.mock('./project-runtime-git-options', () => ({
   getLocalProjectWorktreeGitOptions: mocks.getWorktreeOptions,
@@ -67,7 +67,7 @@ beforeEach(() => {
   mocks.discard.mockReset().mockResolvedValue(undefined)
   mocks.unlock.mockReset().mockResolvedValue(undefined)
   mocks.getWorktreeOptions.mockReset().mockReturnValue({})
-  mocks.withinDivergence.mockReset().mockResolvedValue(true)
+  mocks.measureDivergence.mockReset().mockResolvedValue('within')
   mocks.resolveBaseRef
     .mockReset()
     .mockImplementation((_repoPath: string, baseRef: string) =>
@@ -192,7 +192,7 @@ describe('worktree create preparation registry', () => {
   it('refuses a same-family retarget whose bases have drifted too far apart', async () => {
     await prepareWorktreeCreateForRepo(store, repo, 'origin/main')
     // An abandoned fork's `main` is the same base family but a whole-tree checkout away.
-    mocks.withinDivergence.mockResolvedValue(false)
+    mocks.measureDivergence.mockResolvedValue('exceeded')
 
     await expect(
       consumePreparedWorktreeCreate({
@@ -208,6 +208,25 @@ describe('worktree create preparation registry', () => {
     expect(mocks.discard).not.toHaveBeenCalled()
   })
 
+  it('separates a drift check that said no from one that could not answer', async () => {
+    await prepareWorktreeCreateForRepo(store, repo, 'origin/main')
+    // A timed-out or aborted walk skipped a retarget that may well have been cheap; that is a
+    // tuning signal, not the bound working as intended, so it must not report as excess drift.
+    mocks.measureDivergence.mockResolvedValue('unknown')
+
+    await expect(
+      consumePreparedWorktreeCreate({
+        repoPath: repo.path,
+        workspaceRoot: '/workspace',
+        worktreePath: '/workspace/final',
+        branch: 'feature/test',
+        baseBranch: 'main'
+      })
+    ).resolves.toEqual({ status: 'miss', reason: 'retarget_unverifiable' })
+    expect(mocks.finalize).not.toHaveBeenCalled()
+    expect(mocks.discard).not.toHaveBeenCalled()
+  })
+
   it('does not spend a divergence walk when the base matches exactly', async () => {
     await prepareWorktreeCreateForRepo(store, repo, 'origin/main')
 
@@ -219,7 +238,7 @@ describe('worktree create preparation registry', () => {
       baseBranch: 'origin/main'
     })
 
-    expect(mocks.withinDivergence).not.toHaveBeenCalled()
+    expect(mocks.measureDivergence).not.toHaveBeenCalled()
   })
 
   it('claims when the two sides spell the same ref differently', async () => {
