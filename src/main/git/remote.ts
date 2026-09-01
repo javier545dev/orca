@@ -7,6 +7,10 @@ import { gitRefTargetsBranchOnRemote } from '../../shared/git-remote-branch-name
 import type { GitPushTarget } from '../../shared/worktree/types'
 import type { GitRuntimeOptions } from './git-runtime-options'
 import { gitOptionsForWorktree } from './git-runtime-options'
+import {
+  postponeRepoRefMaintenance,
+  withRepoRefMaintenancePaused
+} from './local-repo-ref-maintenance'
 import { validateGitPushTarget } from './push-target-validation'
 import { gitExecFileAsync } from './runner'
 import { runWithGitReadCacheInvalidation } from './status'
@@ -259,8 +263,11 @@ export async function gitPull(
   // Why: plain `git pull` uses the user's configured pull strategy (merge by
   // default) so diverged branches reconcile instead of erroring out. Conflicts
   // surface through the existing conflict-resolution flow.
-  await runWithGitWorktreeOperationLock(worktreePath, options.signal, () =>
-    runWithGitReadCacheInvalidation(() => gitPullWithArgs(worktreePath, [], pushTarget, options))
+  postponeRepoRefMaintenance()
+  await withRepoRefMaintenancePaused('git-pull', () =>
+    runWithGitWorktreeOperationLock(worktreePath, options.signal, () =>
+      runWithGitReadCacheInvalidation(() => gitPullWithArgs(worktreePath, [], pushTarget, options))
+    )
   )
 }
 
@@ -269,9 +276,12 @@ export async function gitFastForward(
   pushTarget?: GitPushTarget,
   options: GitRuntimeOptions = {}
 ): Promise<void> {
-  await runWithGitWorktreeOperationLock(worktreePath, options.signal, () =>
-    runWithGitReadCacheInvalidation(() =>
-      gitPullWithArgs(worktreePath, ['--ff-only'], pushTarget, options)
+  postponeRepoRefMaintenance()
+  await withRepoRefMaintenancePaused('git-fast-forward', () =>
+    runWithGitWorktreeOperationLock(worktreePath, options.signal, () =>
+      runWithGitReadCacheInvalidation(() =>
+        gitPullWithArgs(worktreePath, ['--ff-only'], pushTarget, options)
+      )
     )
   )
 }
@@ -281,16 +291,22 @@ export async function gitFetch(
   pushTarget?: GitPushTarget,
   options: GitRuntimeOptions = {}
 ): Promise<void> {
+  // `--prune` deletes remote-tracking refs, which needs the `packed-refs` lock a
+  // running idle pack holds while it rewrites. This is the user clicking Fetch,
+  // so it must never fail on that lock -- pause maintenance for the duration.
+  postponeRepoRefMaintenance()
   try {
-    if (pushTarget) {
-      const target = await validateGitPushTarget(worktreePath, pushTarget, options)
-      await gitExecFileAsync(
-        ['fetch', '--prune', target.remoteName],
-        gitOptionsForWorktree(worktreePath, options)
-      )
-      return
-    }
-    await gitExecFileAsync(['fetch', '--prune'], gitOptionsForWorktree(worktreePath, options))
+    await withRepoRefMaintenancePaused('git-fetch', async () => {
+      if (pushTarget) {
+        const target = await validateGitPushTarget(worktreePath, pushTarget, options)
+        await gitExecFileAsync(
+          ['fetch', '--prune', target.remoteName],
+          gitOptionsForWorktree(worktreePath, options)
+        )
+        return
+      }
+      await gitExecFileAsync(['fetch', '--prune'], gitOptionsForWorktree(worktreePath, options))
+    })
   } catch (error) {
     throw new Error(normalizeGitErrorMessage(error, 'fetch'))
   }
