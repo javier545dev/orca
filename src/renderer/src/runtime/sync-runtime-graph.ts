@@ -13,6 +13,7 @@ import {
 import { createBrowserUuid } from '@/lib/browser-uuid'
 import type { PaneManager } from '@/lib/pane-manager/pane-manager'
 import { resolveLeafIdForManager } from '@/lib/pane-manager/pane-key-resolution'
+import { getIndexedWorktreesById } from '@/store/worktree-repo-index'
 import { getSystemPrefersDark, resolveEffectiveTerminalAppearance } from '@/lib/terminal-theme'
 import { sanitizeTerminalLayoutPaneTitles } from '@/lib/terminal-pane-title-sanitization'
 import type { AppState } from '@/store/types'
@@ -162,13 +163,9 @@ type MobileSessionWorktreeInputs = {
 }
 
 function getWorktreeInstanceIdFromState(state: AppState, worktreeId: string): string | undefined {
-  for (const worktrees of Object.values(state.worktreesByRepo ?? {})) {
-    const worktree = worktrees.find((candidate) => candidate.id === worktreeId)
-    if (worktree?.instanceId !== undefined) {
-      return worktree.instanceId
-    }
-  }
-  return undefined
+  return getIndexedWorktreesById(state.worktreesByRepo ?? {}, worktreeId).find(
+    (worktree) => worktree.instanceId !== undefined
+  )?.instanceId
 }
 
 type RegisteredTerminalTabKey = string
