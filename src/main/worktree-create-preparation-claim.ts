@@ -26,8 +26,9 @@ export type PreparationRequest = {
   workspaceRootKey: string
   wslDistro: string
   baseBranch: string
-  /** Awaited only when the raw base did not already match, so the common hit spawns no git. */
-  canonicalBase: () => Promise<string>
+  /** `null` until the caller has paid the ref probe. A raw-base match resolves without it, so the
+   *  common hit spawns no git at all. */
+  canonicalBase: string | null
 }
 
 /** Case-folded on Windows, so the arming and claiming sides key on the same path. */
@@ -54,6 +55,9 @@ export type PreparationSelection<T> =
    *  paying the ref probe a second time. */
   | { kind: 'exact'; candidate: T; canonicalBase: string }
   | { kind: 'retarget'; candidate: T; canonicalBase: string }
+  /** Something is armed for this repo but not under this raw base; only a resolved canonical base
+   *  can decide between a hit and a miss. */
+  | { kind: 'needs-canonical-base' }
   | { kind: 'miss'; reason: PreparationSelectionMissReason }
 
 /**
@@ -67,11 +71,14 @@ export type PreparationSelection<T> =
  *
  * The bound matters: refs outside the same branch family are rejected, because a retarget across
  * unrelated history degenerates into a full checkout and wins nothing.
+ *
+ * Synchronous on purpose: the caller claims the returned entry in the same run, so two concurrent
+ * creates cannot both walk away with the same prepared checkout.
  */
-export async function selectPreparationForCreate<T extends PreparationCandidate>(
+export function selectPreparationForCreate<T extends PreparationCandidate>(
   candidates: readonly T[],
   request: PreparationRequest
-): Promise<PreparationSelection<T>> {
+): PreparationSelection<T> {
   const sameRepo = candidates.filter((candidate) => candidate.repoPathKey === request.repoPathKey)
   if (sameRepo.length === 0) {
     return { kind: 'miss', reason: 'none_armed' }
@@ -88,13 +95,15 @@ export async function selectPreparationForCreate<T extends PreparationCandidate>
     return { kind: 'miss', reason: 'workspace_root_mismatch' }
   }
 
-  const rawMatch = sameRoot.find((candidate) => candidate.baseBranch === request.baseBranch)
-  if (rawMatch) {
+  const { canonicalBase } = request
+  if (canonicalBase === null) {
+    const rawMatch = sameRoot.find((candidate) => candidate.baseBranch === request.baseBranch)
     // Same spelling, so the armed entry already holds this request's canonical form.
-    return { kind: 'exact', candidate: rawMatch, canonicalBase: rawMatch.canonicalBase }
+    return rawMatch
+      ? { kind: 'exact', candidate: rawMatch, canonicalBase: rawMatch.canonicalBase }
+      : { kind: 'needs-canonical-base' }
   }
 
-  const canonicalBase = await request.canonicalBase()
   const canonicalMatch = sameRoot.find((candidate) => candidate.canonicalBase === canonicalBase)
   if (canonicalMatch) {
     return { kind: 'exact', candidate: canonicalMatch, canonicalBase }

@@ -198,6 +198,33 @@ describe('worktree create preparation registry', () => {
     ).resolves.toEqual({ status: 'hit', retargeted: false, result: {} })
   })
 
+  it('never hands the same prepared checkout to two concurrent creates', async () => {
+    await prepareWorktreeCreateForRepo(store, repo, 'origin/main')
+
+    // `main` needs the ref probe, so the claim has to await mid-flight — the window where a
+    // second create could otherwise walk away with the same preparation.
+    const [first, second] = await Promise.all([
+      consumePreparedWorktreeCreate({
+        repoPath: repo.path,
+        workspaceRoot: '/workspace',
+        worktreePath: '/workspace/first',
+        branch: 'feature/first',
+        baseBranch: 'main'
+      }),
+      consumePreparedWorktreeCreate({
+        repoPath: repo.path,
+        workspaceRoot: '/workspace',
+        worktreePath: '/workspace/second',
+        branch: 'feature/second',
+        baseBranch: 'main'
+      })
+    ])
+
+    expect([first.status, second.status]).toContain('hit')
+    const preparedPaths = mocks.finalize.mock.calls.map((call) => call[1])
+    expect(new Set(preparedPaths).size).toBe(preparedPaths.length)
+  })
+
   it('reports which part of the claim key disagreed', async () => {
     await prepareWorktreeCreateForRepo(store, repo, 'origin/main')
 

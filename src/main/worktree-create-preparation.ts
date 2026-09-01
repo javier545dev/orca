@@ -1,30 +1,24 @@
-import { randomUUID } from 'node:crypto'
 import { mkdir } from 'node:fs/promises'
 import { posix, win32 } from 'node:path'
 import type { Store } from './persistence'
 import type { Repo } from '../shared/repo-types'
 import { isFolderRepo } from '../shared/repo-kind'
 import { isWindowsAbsolutePathLike } from '../shared/cross-platform-path'
-import {
-  WORKTREE_CREATE_PREPARATION_DIRECTORY,
-  createWorktreePreparationLockReason
-} from '../shared/worktree/create-preparation'
 import type { PreparedCheckoutMissReason } from '../shared/worktree/create-types'
 import type { AddWorktreeOptions, AddWorktreeResult } from './git/worktree'
 import { resolveLocalWorktreeBaseRef } from './git/worktree-base-ref-probe'
+import { preparationPathKey, selectPreparationForCreate } from './worktree-create-preparation-claim'
 import {
-  preparationEntryKey,
-  preparationPathKey,
-  selectPreparationForCreate
-} from './worktree-create-preparation-claim'
-import {
-  _resetStalePreparationReclaimForTests,
-  reclaimStaleWorktreePreparations
-} from './worktree-create-preparation-reclaim'
+  _resetPreparationPoolForTests,
+  findPreparation,
+  listPreparations,
+  startPreparation,
+  takePreparation,
+  type PreparationEntry
+} from './worktree-create-preparation-pool'
 import {
   discardPreparedWorktree,
-  finalizePreparedWorktree,
-  prepareWorktreeCreateCheckout
+  finalizePreparedWorktree
 } from './git/worktree-create-preparation'
 import {
   getLocalProjectWorktreeGitOptions,
@@ -37,24 +31,10 @@ import {
 } from './worktree-create-preparation-burst'
 import { toHostFilesystemPath } from './host-tree-removal'
 
-export const WORKTREE_CREATE_PREPARATION_TTL_MS = 5 * 60_000
-export const WORKTREE_CREATE_PREPARATION_LIMIT = 3
-
-type PreparationEntry = {
-  key: string
-  repoPath: string
-  repoPathKey: string
-  workspaceRoot: string
-  workspaceRootKey: string
-  wslDistro: string
-  baseBranch: string
-  canonicalBase: string
-  preparedPath: string
-  options: AddWorktreeOptions
-  createdAt: number
-  ready: Promise<void>
-  expiration: NodeJS.Timeout
-}
+export {
+  WORKTREE_CREATE_PREPARATION_LIMIT,
+  WORKTREE_CREATE_PREPARATION_TTL_MS
+} from './worktree-create-preparation-pool'
 
 export type PreparedWorktreeCreateAttempt =
   | { status: 'hit'; retargeted: boolean; result: AddWorktreeResult }
@@ -70,12 +50,6 @@ type ConsumePreparedWorktreeArgs = {
   options?: AddWorktreeOptions
 }
 
-const preparations = new Map<string, PreparationEntry>()
-
-function pathOps(path: string): Pick<typeof posix, 'dirname' | 'join'> {
-  return isWindowsAbsolutePathLike(path) ? win32 : posix
-}
-
 function canonicalBaseRef(
   repoPath: string,
   baseBranch: string,
@@ -86,33 +60,6 @@ function canonicalBaseRef(
     baseBranch,
     options.wslDistro ? { wslDistro: options.wslDistro } : {}
   )
-}
-
-async function discardEntry(entry: PreparationEntry): Promise<void> {
-  await entry.ready.catch(() => {})
-  await discardPreparedWorktree(entry.repoPath, entry.preparedPath, entry.options).catch(() => {})
-}
-
-function expireEntry(entry: PreparationEntry): void {
-  if (preparations.get(entry.key) !== entry) {
-    return
-  }
-  preparations.delete(entry.key)
-  void discardEntry(entry)
-}
-
-function enforcePreparationLimit(): void {
-  while (preparations.size >= WORKTREE_CREATE_PREPARATION_LIMIT) {
-    const oldest = [...preparations.values()].sort(
-      (left, right) => left.createdAt - right.createdAt
-    )[0]
-    if (!oldest) {
-      return
-    }
-    preparations.delete(oldest.key)
-    clearTimeout(oldest.expiration)
-    void discardEntry(oldest)
-  }
 }
 
 export async function prepareWorktreeCreateForRepo(
@@ -133,13 +80,11 @@ export async function prepareWorktreeCreateForRepo(
     getWorktreePathSettings(repo, store.getSettings(), getWorktreeMirrorDistro(store, repo))
   )
   const canonicalBase = await canonicalBaseRef(repo.path, baseBranch, options)
-  const existing = preparations.get(
-    preparationEntryKey(
-      preparationPathKey(repo.path),
-      preparationPathKey(workspaceRoot),
-      canonicalBase,
-      options.wslDistro ?? ''
-    )
+  const existing = findPreparation(
+    preparationPathKey(repo.path),
+    preparationPathKey(workspaceRoot),
+    canonicalBase,
+    options.wslDistro ?? ''
   )
   if (existing) {
     return existing.ready
@@ -154,77 +99,6 @@ export async function prepareWorktreeCreateForRepo(
   })
 }
 
-type StartPreparationArgs = {
-  repoPath: string
-  workspaceRoot: string
-  baseBranch: string
-  canonicalBase: string
-  options: AddWorktreeOptions
-}
-
-function startPreparation({
-  repoPath,
-  workspaceRoot,
-  baseBranch,
-  canonicalBase,
-  options
-}: StartPreparationArgs): Promise<void> {
-  const repoPathKey = preparationPathKey(repoPath)
-  const workspaceRootKey = preparationPathKey(workspaceRoot)
-  const wslDistro = options.wslDistro ?? ''
-  const key = preparationEntryKey(repoPathKey, workspaceRootKey, canonicalBase, wslDistro)
-  enforcePreparationLimit()
-  const preparationId = `${process.pid}-${randomUUID()}`
-  const lockReason = createWorktreePreparationLockReason(preparationId)
-  const preparedPath = pathOps(workspaceRoot).join(
-    workspaceRoot,
-    WORKTREE_CREATE_PREPARATION_DIRECTORY,
-    preparationId
-  )
-  const entry = {} as PreparationEntry
-  const expiration = setTimeout(() => expireEntry(entry), WORKTREE_CREATE_PREPARATION_TTL_MS)
-  expiration.unref()
-  Object.assign(entry, {
-    key,
-    repoPath,
-    repoPathKey,
-    workspaceRoot,
-    workspaceRootKey,
-    wslDistro,
-    baseBranch,
-    canonicalBase,
-    preparedPath,
-    options,
-    createdAt: Date.now(),
-    expiration,
-    ready: (async () => {
-      await reclaimStaleWorktreePreparations(repoPathKey, repoPath, options)
-      await mkdir(
-        toHostFilesystemPath(
-          pathOps(workspaceRoot).join(workspaceRoot, WORKTREE_CREATE_PREPARATION_DIRECTORY)
-        ),
-        { recursive: true }
-      )
-      // Already canonical, so the add re-resolves nothing.
-      await prepareWorktreeCreateCheckout(
-        repoPath,
-        preparedPath,
-        canonicalBase,
-        lockReason,
-        options
-      )
-    })()
-  } satisfies PreparationEntry)
-  preparations.set(key, entry)
-  void entry.ready.catch(() => {
-    if (preparations.get(key) === entry) {
-      preparations.delete(key)
-      clearTimeout(entry.expiration)
-    }
-  })
-  return entry.ready
-}
-
 type ClaimedPreparation =
   | { status: 'claimed'; entry: PreparationEntry; retargeted: boolean; canonicalBase: string }
   | { status: 'miss'; reason: PreparedCheckoutMissReason }
@@ -233,19 +107,30 @@ async function claimPreparedWorktree(
   args: ConsumePreparedWorktreeArgs,
   options: AddWorktreeOptions
 ): Promise<ClaimedPreparation> {
-  const selection = await selectPreparationForCreate([...preparations.values()], {
+  const request = {
     repoPathKey: preparationPathKey(args.repoPath),
     workspaceRootKey: preparationPathKey(args.workspaceRoot),
     wslDistro: options.wslDistro ?? '',
-    baseBranch: args.baseBranch,
-    canonicalBase: () => canonicalBaseRef(args.repoPath, args.baseBranch, options)
+    baseBranch: args.baseBranch
+  }
+  let selection = selectPreparationForCreate(listPreparations(), {
+    ...request,
+    canonicalBase: null
   })
-  if (selection.kind === 'miss') {
-    return { status: 'miss', reason: selection.reason }
+  if (selection.kind === 'needs-canonical-base') {
+    // The probe is the only await here, and the pool is re-read after it, so the select-and-take
+    // below stays one synchronous run and no other create can hold the same entry.
+    const canonicalBase = await canonicalBaseRef(args.repoPath, args.baseBranch, options)
+    selection = selectPreparationForCreate(listPreparations(), { ...request, canonicalBase })
+  }
+  if (selection.kind !== 'exact' && selection.kind !== 'retarget') {
+    return {
+      status: 'miss',
+      reason: selection.kind === 'miss' ? selection.reason : 'base_mismatch'
+    }
   }
   const entry = selection.candidate
-  preparations.delete(entry.key)
-  clearTimeout(entry.expiration)
+  takePreparation(entry)
   try {
     await entry.ready
     return {
@@ -274,9 +159,7 @@ function rearmPreparation(
   const continuesBurst = recordPreparationConsume(entry.key)
   if (
     !continuesBurst ||
-    preparations.has(
-      preparationEntryKey(entry.repoPathKey, entry.workspaceRootKey, canonicalBase, entry.wslDistro)
-    )
+    findPreparation(entry.repoPathKey, entry.workspaceRootKey, canonicalBase, entry.wslDistro)
   ) {
     return
   }
@@ -301,9 +184,10 @@ export async function consumePreparedWorktreeCreate(
   }
   const { entry } = claim
   try {
-    await mkdir(toHostFilesystemPath(pathOps(args.worktreePath).dirname(args.worktreePath)), {
-      recursive: true
-    })
+    const parentDir = isWindowsAbsolutePathLike(args.worktreePath)
+      ? win32.dirname(args.worktreePath)
+      : posix.dirname(args.worktreePath)
+    await mkdir(toHostFilesystemPath(parentDir), { recursive: true })
     // Finalize resolves the requested base itself and resets the prepared checkout onto that
     // commit, so a retargeted claim is handed over at the requested commit or not at all.
     const result = await finalizePreparedWorktree(
@@ -330,14 +214,6 @@ export async function consumePreparedWorktreeCreate(
 }
 
 export async function _resetWorktreeCreatePreparationsForTests(): Promise<void> {
-  const entries = [...preparations.values()]
-  preparations.clear()
   resetPreparationConsumeHistoryForTests()
-  _resetStalePreparationReclaimForTests()
-  await Promise.all(
-    entries.map(async (entry) => {
-      clearTimeout(entry.expiration)
-      await discardEntry(entry)
-    })
-  )
+  await _resetPreparationPoolForTests()
 }

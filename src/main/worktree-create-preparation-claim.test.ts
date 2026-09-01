@@ -1,7 +1,9 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import {
+  preparationPathKey,
   selectPreparationForCreate,
-  type PreparationCandidate
+  type PreparationCandidate,
+  type PreparationRequest
 } from './worktree-create-preparation-claim'
 
 function candidate(overrides: Partial<PreparationCandidate> = {}): PreparationCandidate {
@@ -16,34 +18,45 @@ function candidate(overrides: Partial<PreparationCandidate> = {}): PreparationCa
   }
 }
 
-function request(overrides: Partial<Parameters<typeof selectPreparationForCreate>[1]> = {}) {
+function request(overrides: Partial<PreparationRequest> = {}): PreparationRequest {
   return {
     repoPathKey: '/repo',
     workspaceRootKey: '/workspace',
     wslDistro: '',
     baseBranch: 'origin/main',
-    canonicalBase: async () => 'refs/remotes/origin/main',
+    canonicalBase: 'refs/remotes/origin/main',
     ...overrides
   }
 }
 
 describe('selectPreparationForCreate', () => {
-  it('matches the identical base without spending a ref probe', async () => {
-    const canonicalBase = vi.fn(async () => 'refs/remotes/origin/main')
+  it('matches the identical base before any ref probe has run', () => {
+    const selection = selectPreparationForCreate([candidate()], request({ canonicalBase: null }))
 
-    const selection = await selectPreparationForCreate([candidate()], request({ canonicalBase }))
-
-    expect(selection).toMatchObject({ kind: 'exact' })
-    expect(canonicalBase).not.toHaveBeenCalled()
+    expect(selection).toEqual({
+      kind: 'exact',
+      candidate: candidate(),
+      canonicalBase: 'refs/remotes/origin/main'
+    })
   })
 
-  it('matches when the two sides spell the same ref differently', async () => {
-    const selection = await selectPreparationForCreate(
+  it('asks for a canonical base only when something is armed under another spelling', () => {
+    expect(
+      selectPreparationForCreate(
+        [candidate()],
+        request({ baseBranch: 'main', canonicalBase: null })
+      )
+    ).toEqual({ kind: 'needs-canonical-base' })
+    // Nothing armed for this repo, so the create must not pay a probe to learn that.
+    expect(
+      selectPreparationForCreate([], request({ baseBranch: 'main', canonicalBase: null }))
+    ).toEqual({ kind: 'miss', reason: 'none_armed' })
+  })
+
+  it('matches when the two sides spell the same ref differently', () => {
+    const selection = selectPreparationForCreate(
       [candidate()],
-      request({
-        baseBranch: 'refs/remotes/origin/main',
-        canonicalBase: async () => 'refs/remotes/origin/main'
-      })
+      request({ baseBranch: 'refs/remotes/origin/main' })
     )
 
     expect(selection).toEqual({
@@ -53,10 +66,10 @@ describe('selectPreparationForCreate', () => {
     })
   })
 
-  it('retargets a local base onto the armed remote-tracking base of the same branch', async () => {
-    const selection = await selectPreparationForCreate(
+  it('retargets a local base onto the armed remote-tracking base of the same branch', () => {
+    const selection = selectPreparationForCreate(
       [candidate()],
-      request({ baseBranch: 'main', canonicalBase: async () => 'refs/heads/main' })
+      request({ baseBranch: 'main', canonicalBase: 'refs/heads/main' })
     )
 
     expect(selection).toEqual({
@@ -66,64 +79,73 @@ describe('selectPreparationForCreate', () => {
     })
   })
 
-  it('prefers the freshest armed entry when several share the family', async () => {
+  it('prefers the freshest armed entry when several share the family', () => {
     const older = candidate({ canonicalBase: 'refs/remotes/origin/main', createdAt: 1 })
     const newer = candidate({ canonicalBase: 'refs/remotes/upstream/main', createdAt: 2 })
 
-    const selection = await selectPreparationForCreate(
+    const selection = selectPreparationForCreate(
       [older, newer],
-      request({ baseBranch: 'main', canonicalBase: async () => 'refs/heads/main' })
+      request({ baseBranch: 'main', canonicalBase: 'refs/heads/main' })
     )
 
     expect(selection).toMatchObject({ kind: 'retarget', candidate: newer })
   })
 
-  it('refuses to retarget onto a different branch', async () => {
-    const selection = await selectPreparationForCreate(
+  it('refuses to retarget onto a different branch', () => {
+    const selection = selectPreparationForCreate(
       [candidate()],
-      request({
-        baseBranch: 'origin/release',
-        canonicalBase: async () => 'refs/remotes/origin/release'
-      })
+      request({ baseBranch: 'origin/release', canonicalBase: 'refs/remotes/origin/release' })
     )
 
     expect(selection).toEqual({ kind: 'miss', reason: 'base_mismatch' })
   })
 
-  it('refuses to retarget onto a bare commit id, whose divergence is unbounded', async () => {
-    const selection = await selectPreparationForCreate(
+  it('refuses to retarget onto a bare commit id, whose divergence is unbounded', () => {
+    const selection = selectPreparationForCreate(
       [candidate()],
-      request({
-        baseBranch: '1f2e3d4c5b6a7988',
-        canonicalBase: async () => '1f2e3d4c5b6a7988'
-      })
+      request({ baseBranch: '1f2e3d4c5b6a7988', canonicalBase: '1f2e3d4c5b6a7988' })
     )
 
     expect(selection).toEqual({ kind: 'miss', reason: 'base_mismatch' })
   })
 
-  it('names the key field that disagreed', async () => {
-    await expect(selectPreparationForCreate([], request())).resolves.toEqual({
+  it('names the key field that disagreed', () => {
+    expect(selectPreparationForCreate([], request())).toEqual({
       kind: 'miss',
       reason: 'none_armed'
     })
-    await expect(
+    expect(
       selectPreparationForCreate([candidate()], request({ repoPathKey: '/other-repo' }))
-    ).resolves.toEqual({ kind: 'miss', reason: 'none_armed' })
-    await expect(
-      selectPreparationForCreate([candidate()], request({ wslDistro: 'Ubuntu' }))
-    ).resolves.toEqual({ kind: 'miss', reason: 'wsl_distro_mismatch' })
-    await expect(
+    ).toEqual({ kind: 'miss', reason: 'none_armed' })
+    expect(selectPreparationForCreate([candidate()], request({ wslDistro: 'Ubuntu' }))).toEqual({
+      kind: 'miss',
+      reason: 'wsl_distro_mismatch'
+    })
+    expect(
       selectPreparationForCreate([candidate()], request({ workspaceRootKey: '/other' }))
-    ).resolves.toEqual({ kind: 'miss', reason: 'workspace_root_mismatch' })
+    ).toEqual({ kind: 'miss', reason: 'workspace_root_mismatch' })
   })
 
-  it('never crosses hosts to satisfy a family retarget', async () => {
-    const selection = await selectPreparationForCreate(
+  it('never crosses hosts to satisfy a family retarget', () => {
+    const selection = selectPreparationForCreate(
       [candidate({ wslDistro: 'Ubuntu' })],
-      request({ baseBranch: 'main', canonicalBase: async () => 'refs/heads/main' })
+      request({ baseBranch: 'main', canonicalBase: 'refs/heads/main' })
     )
 
     expect(selection).toEqual({ kind: 'miss', reason: 'wsl_distro_mismatch' })
+  })
+})
+
+describe('preparationPathKey', () => {
+  it('normalizes a posix path without folding case', () => {
+    expect(preparationPathKey('/workspace/./repo/')).toBe('/workspace/repo/')
+    expect(preparationPathKey('/Workspace/Repo')).toBe('/Workspace/Repo')
+  })
+
+  it('folds case for Windows drive and UNC paths, which compare case-insensitively', () => {
+    expect(preparationPathKey('C:\\Workspace\\Repo')).toBe('c:\\workspace\\repo')
+    expect(preparationPathKey('\\\\wsl.localhost\\Ubuntu\\home\\jin')).toBe(
+      '\\\\wsl.localhost\\ubuntu\\home\\jin'
+    )
   })
 })
