@@ -126,6 +126,7 @@ type MountedTerminalSurfaceCapture = {
  */
 type MobileSessionWorktreeInputs = {
   worktreeId: string
+  worktreeInstanceId: string | undefined
   terminalTabs: AppState['tabsByWorktree'][string]
   browserWorkspaces: AppState['browserTabsByWorktree'][string]
   unifiedTabs: AppState['unifiedTabsByWorktree'][string]
@@ -158,6 +159,16 @@ type MobileSessionWorktreeInputs = {
   generatedTitlesEnabled: boolean
   terminalTheme: RuntimeMobileTerminalTheme | undefined
   mountedSurfaceCaptureByTabId: ReadonlyMap<string, MountedTerminalSurfaceCapture>
+}
+
+function getWorktreeInstanceIdFromState(state: AppState, worktreeId: string): string | undefined {
+  for (const worktrees of Object.values(state.worktreesByRepo ?? {})) {
+    const worktree = worktrees.find((candidate) => candidate.id === worktreeId)
+    if (worktree?.instanceId !== undefined) {
+      return worktree.instanceId
+    }
+  }
+  return undefined
 }
 
 type RegisteredTerminalTabKey = string
@@ -1142,6 +1153,7 @@ function buildMobileSessionWorktreeInputs(
   const activeTabId = state.activeTabId
   return {
     worktreeId,
+    worktreeInstanceId: getWorktreeInstanceIdFromState(state, worktreeId),
     terminalTabs,
     browserWorkspaces,
     unifiedTabs: state.unifiedTabsByWorktree[worktreeId] ?? EMPTY_WORKTREE_UNIFIED_TABS,
@@ -1298,6 +1310,7 @@ function canReuseMobileSessionSnapshot(
 ): boolean {
   return (
     previous.worktreeId === next.worktreeId &&
+    previous.worktreeInstanceId === next.worktreeInstanceId &&
     previous.terminalTabs === next.terminalTabs &&
     previous.browserWorkspaces === next.browserWorkspaces &&
     previous.unifiedTabs === next.unifiedTabs &&
@@ -1533,16 +1546,29 @@ export function buildMobileSessionTabSnapshots(
     // The counter only ever advances, so a later real change still outranks it.
     const candidateVersion = ++mobileSessionSnapshotVersion
     if (cached && jsonContentEquals(cached.content, content)) {
+      const snapshot =
+        cached.snapshot.worktreeInstanceId === inputs.worktreeInstanceId
+          ? cached.snapshot
+          : {
+              worktree: worktreeId,
+              ...(inputs.worktreeInstanceId
+                ? { worktreeInstanceId: inputs.worktreeInstanceId }
+                : {}),
+              publicationEpoch: mobileSessionPublicationEpoch,
+              snapshotVersion: candidateVersion,
+              ...content
+            }
       mobileSessionSnapshotCacheByWorktree.set(worktreeId, {
         inputs,
         content,
-        snapshot: cached.snapshot
+        snapshot
       })
-      snapshots.push(cached.snapshot)
+      snapshots.push(snapshot)
       continue
     }
     const snapshot: RuntimeMobileSessionTabsSnapshot = {
       worktree: worktreeId,
+      ...(inputs.worktreeInstanceId ? { worktreeInstanceId: inputs.worktreeInstanceId } : {}),
       publicationEpoch: mobileSessionPublicationEpoch,
       snapshotVersion: candidateVersion,
       ...content
