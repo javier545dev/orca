@@ -31,9 +31,29 @@ export type WorktreeCreateTimingPhase = {
   durationMs: number
 }
 
+/** Closed vocabulary: these values reach span attributes, so none of them may ever
+ *  be derived from a branch name, a ref, or a path. */
+export type PreparedCheckoutMissReason =
+  | 'none_armed'
+  | 'base_mismatch'
+  | 'workspace_root_mismatch'
+  | 'wsl_distro_mismatch'
+  | 'prepare_failed'
+  | 'finalize_failed'
+  | 'checkout_existing_branch'
+  | 'sparse_checkout'
+
+/** Whether a create reused a prewarmed checkout, and when it did not, which part of
+ *  the claim key disagreed. `retargeted` marks a hit that had to reset the prepared
+ *  checkout onto a different ref in the same base family. */
+export type PreparedCheckoutOutcome =
+  | { status: 'hit'; retargeted: boolean }
+  | { status: 'miss'; reason: PreparedCheckoutMissReason }
+
 export type WorktreeCreateTiming = {
   totalDurationMs: number
   phases: WorktreeCreateTimingPhase[]
+  preparedCheckout?: PreparedCheckoutOutcome
 }
 
 export type CreateSparseCheckoutRequest = {

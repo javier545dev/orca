@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Store } from './persistence'
 import type { Repo } from '../shared/repo-types'
 import { WORKTREE_CREATE_PREPARATION_DIRECTORY } from '../shared/worktree/create-preparation'
+import { resolveWorktreeAddBaseRef } from '../shared/worktree/base-ref'
 
 const mocks = vi.hoisted(() => ({
   mkdir: vi.fn(),
@@ -12,7 +13,8 @@ const mocks = vi.hoisted(() => ({
   unlock: vi.fn(),
   getWorktreeOptions: vi.fn(),
   computeWorkspaceRoot: vi.fn(),
-  computeWorkspaceRootAsync: vi.fn()
+  computeWorkspaceRootAsync: vi.fn(),
+  resolveBaseRef: vi.fn()
 }))
 
 vi.mock('node:fs/promises', () => ({ mkdir: mocks.mkdir }))
@@ -22,6 +24,9 @@ vi.mock('./git/worktree-create-preparation', () => ({
   finalizePreparedWorktree: mocks.finalize,
   discardPreparedWorktree: mocks.discard,
   unlockPreparedWorktree: mocks.unlock
+}))
+vi.mock('./git/worktree-base-ref-probe', () => ({
+  resolveLocalWorktreeBaseRef: mocks.resolveBaseRef
 }))
 vi.mock('./project-runtime-git-options', () => ({
   getLocalProjectWorktreeGitOptions: mocks.getWorktreeOptions,
@@ -42,6 +47,11 @@ import {
   prepareWorktreeCreateForRepo
 } from './worktree-create-preparation'
 
+const EXISTING_REFS = new Set([
+  'refs/heads/main',
+  'refs/remotes/origin/main',
+  'refs/remotes/origin/release'
+])
 const repo = { id: 'repo-1', path: '/repo' } as Repo
 const store = { getSettings: () => ({}) } as unknown as Store
 
@@ -53,6 +63,11 @@ beforeEach(() => {
   mocks.discard.mockReset().mockResolvedValue(undefined)
   mocks.unlock.mockReset().mockResolvedValue(undefined)
   mocks.getWorktreeOptions.mockReset().mockReturnValue({})
+  mocks.resolveBaseRef
+    .mockReset()
+    .mockImplementation((_repoPath: string, baseRef: string) =>
+      resolveWorktreeAddBaseRef(baseRef, async (candidate) => EXISTING_REFS.has(candidate))
+    )
   mocks.computeWorkspaceRoot.mockReset().mockImplementation(() => {
     throw new Error('synchronous workspace-root lookup must not run on the main thread')
   })
@@ -129,7 +144,7 @@ describe('worktree create preparation registry', () => {
     expect(mocks.prepareCheckout).toHaveBeenCalledTimes(1)
   })
 
-  it('does not claim a preparation after the selected base changes', async () => {
+  it('does not claim a preparation after the selected base changes to another branch', async () => {
     await prepareWorktreeCreateForRepo(store, repo, 'origin/main')
 
     await expect(
@@ -140,7 +155,82 @@ describe('worktree create preparation registry', () => {
         branch: 'feature/test',
         baseBranch: 'origin/release'
       })
-    ).resolves.toBeNull()
+    ).resolves.toEqual({ status: 'miss', reason: 'base_mismatch' })
+    expect(mocks.finalize).not.toHaveBeenCalled()
+  })
+
+  it('claims across the local/remote spelling of the same base and reports the retarget', async () => {
+    await prepareWorktreeCreateForRepo(store, repo, 'origin/main')
+
+    // `main` has no local ref here, so the canonical forms differ and only the base family matches.
+    await expect(
+      consumePreparedWorktreeCreate({
+        repoPath: repo.path,
+        workspaceRoot: '/workspace',
+        worktreePath: '/workspace/final',
+        branch: 'feature/test',
+        baseBranch: 'main'
+      })
+    ).resolves.toEqual({ status: 'hit', retargeted: true, result: {} })
+    // Finalize still receives the requested base, so it resets onto the requested commit.
+    expect(mocks.finalize).toHaveBeenCalledWith(
+      repo.path,
+      expect.any(String),
+      '/workspace/final',
+      'feature/test',
+      'main',
+      undefined,
+      {}
+    )
+  })
+
+  it('claims when the two sides spell the same ref differently', async () => {
+    await prepareWorktreeCreateForRepo(store, repo, 'origin/main')
+
+    await expect(
+      consumePreparedWorktreeCreate({
+        repoPath: repo.path,
+        workspaceRoot: '/workspace',
+        worktreePath: '/workspace/final',
+        branch: 'feature/test',
+        baseBranch: 'refs/remotes/origin/main'
+      })
+    ).resolves.toEqual({ status: 'hit', retargeted: false, result: {} })
+  })
+
+  it('reports which part of the claim key disagreed', async () => {
+    await prepareWorktreeCreateForRepo(store, repo, 'origin/main')
+
+    await expect(
+      consumePreparedWorktreeCreate({
+        repoPath: repo.path,
+        workspaceRoot: '/other-workspace',
+        worktreePath: '/other-workspace/final',
+        branch: 'feature/test',
+        baseBranch: 'origin/main'
+      })
+    ).resolves.toEqual({ status: 'miss', reason: 'workspace_root_mismatch' })
+
+    await expect(
+      consumePreparedWorktreeCreate({
+        repoPath: repo.path,
+        workspaceRoot: '/workspace',
+        worktreePath: '/workspace/final',
+        branch: 'feature/test',
+        baseBranch: 'origin/main',
+        options: { wslDistro: 'Ubuntu' }
+      })
+    ).resolves.toEqual({ status: 'miss', reason: 'wsl_distro_mismatch' })
+
+    await expect(
+      consumePreparedWorktreeCreate({
+        repoPath: '/other-repo',
+        workspaceRoot: '/workspace',
+        worktreePath: '/workspace/final',
+        branch: 'feature/test',
+        baseBranch: 'origin/main'
+      })
+    ).resolves.toEqual({ status: 'miss', reason: 'none_armed' })
     expect(mocks.finalize).not.toHaveBeenCalled()
   })
 
@@ -161,7 +251,7 @@ describe('worktree create preparation registry', () => {
     expect(mocks.prepareCheckout).toHaveBeenCalledWith(
       repo.path,
       expect.any(String),
-      'origin/main',
+      'refs/remotes/origin/main',
       expect.any(String),
       options
     )
@@ -241,7 +331,7 @@ describe('worktree create preparation registry', () => {
     )
   })
 
-  it('cleans up and returns null so normal add can run when finalization fails', async () => {
+  it('cleans up and reports a finalize miss so normal add can run', async () => {
     await prepareWorktreeCreateForRepo(store, repo, 'origin/main')
     mocks.finalize.mockRejectedValueOnce(new Error('submodules prevent worktree move'))
 
@@ -253,7 +343,7 @@ describe('worktree create preparation registry', () => {
         branch: 'feature/test',
         baseBranch: 'origin/main'
       })
-    ).resolves.toBeNull()
+    ).resolves.toEqual({ status: 'miss', reason: 'finalize_failed' })
     expect(mocks.mkdir).toHaveBeenCalledWith('/workspace', { recursive: true })
     expect(mocks.discard).toHaveBeenCalledTimes(1)
   })
@@ -295,7 +385,7 @@ describe('worktree create preparation registry', () => {
         branch: 'feature/third',
         baseBranch: 'origin/main'
       })
-    ).resolves.toEqual({})
+    ).resolves.toEqual({ status: 'hit', retargeted: false, result: {} })
     expect(mocks.finalize).toHaveBeenCalledTimes(3)
   })
 

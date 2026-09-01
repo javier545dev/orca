@@ -2370,7 +2370,7 @@ export async function createLocalWorktree(
     addResult =
       (await timing.time('git_worktree_add', async () => {
         if (sparseDirectories.length === 0 && !checkoutExistingBranch) {
-          const preparedResult = await consumePreparedWorktreeCreate({
+          const prepared = await consumePreparedWorktreeCreate({
             repoPath: repo.path,
             workspaceRoot,
             worktreePath,
@@ -2379,9 +2379,19 @@ export async function createLocalWorktree(
             refreshLocalBaseRef: settings.refreshLocalBaseRefOnWorktreeCreate,
             ...(preparedWorktreeOptions ? { options: preparedWorktreeOptions } : {})
           })
-          if (preparedResult) {
-            return preparedResult
+          timing.recordPreparedCheckout(
+            prepared.status === 'hit'
+              ? { status: 'hit', retargeted: prepared.retargeted }
+              : { status: 'miss', reason: prepared.reason }
+          )
+          if (prepared.status === 'hit') {
+            return prepared.result
           }
+        } else {
+          timing.recordPreparedCheckout({
+            status: 'miss',
+            reason: sparseDirectories.length > 0 ? 'sparse_checkout' : 'checkout_existing_branch'
+          })
         }
         if (sparseDirectories.length > 0) {
           if (checkoutExistingBranch) {
