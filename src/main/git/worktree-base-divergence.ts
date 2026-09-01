@@ -24,11 +24,15 @@ async function countCommitsAhead(
   try {
     // `--max-count` stops the walk, so an unrelated history costs a bounded number of commits
     // rather than a full traversal. Both flags predate the Git 2.25 baseline.
+    // `--end-of-options` (Git 2.24) because a range whose left side began with `-` would
+    // otherwise parse as an option; callers only pass `refs/`-qualified names today, and this
+    // keeps that from being load-bearing.
     const { stdout } = await gitExecFileAsync(
       [
         'rev-list',
         '--count',
         `--max-count=${RETARGET_MAX_COMMIT_DIVERGENCE + 1}`,
+        '--end-of-options',
         `${fromRef}..${toRef}`
       ],
       { cwd: repoPath, ...options }
@@ -47,10 +51,10 @@ async function hasCommonHistory(
   options: GitExecOptions
 ): Promise<boolean> {
   try {
-    const { stdout } = await gitExecFileAsync(['merge-base', leftRef, rightRef], {
-      cwd: repoPath,
-      ...options
-    })
+    const { stdout } = await gitExecFileAsync(
+      ['merge-base', '--end-of-options', leftRef, rightRef],
+      { cwd: repoPath, ...options }
+    )
     return stdout.trim().length > 0
   } catch {
     return false

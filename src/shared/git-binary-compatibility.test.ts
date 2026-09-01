@@ -193,23 +193,24 @@ describeBinaryCompatibility('real Git binary compatibility', () => {
     ).stdout.trim()
 
     await expect(
-      runGit(['rev-list', '--count', '--max-count=101', `${head}..${ahead2}`])
+      runGit(['rev-list', '--count', '--max-count=101', '--end-of-options', `${head}..${ahead2}`])
     ).resolves.toMatchObject({ stdout: '2\n' })
-    // `--max-count` must cap the count, or the bound's walk is not bounded.
+    // `--max-count` must report the capped number, not the full one: the bound reads it as a
+    // ceiling, so a Git that returned the true count would reject every retarget instead.
     await expect(
-      runGit(['rev-list', '--count', '--max-count=1', `${head}..${ahead2}`])
+      runGit(['rev-list', '--count', '--max-count=1', '--end-of-options', `${head}..${ahead2}`])
     ).resolves.toMatchObject({ stdout: '1\n' })
     await expect(
-      runGit(['rev-list', '--count', '--max-count=101', `${ahead2}..${head}`])
+      runGit(['rev-list', '--count', '--max-count=101', '--end-of-options', `${ahead2}..${head}`])
     ).resolves.toMatchObject({ stdout: '0\n' })
 
-    await expect(runGit(['merge-base', head, ahead2])).resolves.toMatchObject({
+    await expect(runGit(['merge-base', '--end-of-options', head, ahead2])).resolves.toMatchObject({
       stdout: `${head}\n`
     })
     // A parentless commit shares no history, which is the case the bound must reject however few
     // commits each side carries.
     const unrelated = (await runGit(['commit-tree', tree, '-m', 'unrelated root'])).stdout.trim()
-    await expect(runGit(['merge-base', head, unrelated])).rejects.toBeDefined()
+    await expect(runGit(['merge-base', '--end-of-options', head, unrelated])).rejects.toBeDefined()
   })
 
   it('recognizes ref and merge-tree compatibility boundaries', async () => {
