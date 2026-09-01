@@ -180,6 +180,16 @@ export async function prepareWorktreeCreateForRepo(
     return existing.ready
   }
 
+  return startPreparation(key, repo.path, workspaceRoot, baseBranch, options)
+}
+
+function startPreparation(
+  key: string,
+  repoPath: string,
+  workspaceRoot: string,
+  baseBranch: string,
+  options: AddWorktreeOptions
+): Promise<void> {
   enforcePreparationLimit()
   const preparationId = `${process.pid}-${randomUUID()}`
   const lockReason = createWorktreePreparationLockReason(preparationId)
@@ -193,21 +203,21 @@ export async function prepareWorktreeCreateForRepo(
   expiration.unref()
   Object.assign(entry, {
     key,
-    repoPath: repo.path,
+    repoPath,
     workspaceRoot,
     preparedPath,
     options,
     createdAt: Date.now(),
     expiration,
     ready: (async () => {
-      await cleanupStalePreparations(repo.path, options)
+      await cleanupStalePreparations(repoPath, options)
       await mkdir(
         toHostFilesystemPath(
           pathOps(workspaceRoot).join(workspaceRoot, WORKTREE_CREATE_PREPARATION_DIRECTORY)
         ),
         { recursive: true }
       )
-      await prepareWorktreeCreateCheckout(repo.path, preparedPath, baseBranch, lockReason, options)
+      await prepareWorktreeCreateCheckout(repoPath, preparedPath, baseBranch, lockReason, options)
     })()
   } satisfies PreparationEntry)
   preparations.set(key, entry)
@@ -241,6 +251,23 @@ async function claimPreparedWorktree(
   }
 }
 
+/** Replaces a just-consumed preparation. Never awaited: create has already returned by the time
+ *  the replacement checkout finishes. */
+function rearmPreparation(entry: PreparationEntry, baseBranch: string): void {
+  if (preparations.has(entry.key)) {
+    return
+  }
+  void startPreparation(
+    entry.key,
+    entry.repoPath,
+    entry.workspaceRoot,
+    baseBranch,
+    entry.options
+  ).catch(() => {
+    // Why: a warm-up failure is recovered by the normal add on the next create.
+  })
+}
+
 export async function consumePreparedWorktreeCreate(
   args: ConsumePreparedWorktreeArgs
 ): Promise<AddWorktreeResult | null> {
@@ -258,7 +285,7 @@ export async function consumePreparedWorktreeCreate(
     await mkdir(toHostFilesystemPath(pathOps(args.worktreePath).dirname(args.worktreePath)), {
       recursive: true
     })
-    return await finalizePreparedWorktree(
+    const result = await finalizePreparedWorktree(
       args.repoPath,
       entry.preparedPath,
       args.worktreePath,
@@ -267,6 +294,11 @@ export async function consumePreparedWorktreeCreate(
       args.refreshLocalBaseRef,
       options
     )
+    // Consuming the only prepared checkout leaves the next create cold, and back-to-back creates
+    // from the same composer are the common case. Re-arm in the background; the TTL and the
+    // preparation limit still bound how long an unused one survives.
+    rearmPreparation(entry, args.baseBranch)
+    return result
   } catch (error) {
     await discardPreparedWorktree(args.repoPath, entry.preparedPath, options).catch(() => {})
     console.warn(
