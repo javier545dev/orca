@@ -70,15 +70,17 @@ export async function isWithinRetargetDivergence(
   options: GitExecOptions = {}
 ): Promise<boolean> {
   // Both directions: commits the target adds decide what the reset writes, commits only the
-  // preparation has decide what it must delete. The merge base is required separately because
-  // unrelated histories replace the whole tree no matter how few commits each side carries.
-  const [ahead, behind, shareHistory] = await Promise.all([
+  // preparation has decide what it must delete.
+  const [ahead, behind] = await Promise.all([
     countCommitsAhead(repoPath, preparedBase, targetBase, options),
-    countCommitsAhead(repoPath, targetBase, preparedBase, options),
-    hasCommonHistory(repoPath, preparedBase, targetBase, options)
+    countCommitsAhead(repoPath, targetBase, preparedBase, options)
   ])
-  if (ahead === null || behind === null || !shareHistory) {
+  if (ahead === null || behind === null || ahead + behind > RETARGET_MAX_COMMIT_DIVERGENCE) {
     return false
   }
-  return ahead + behind <= RETARGET_MAX_COMMIT_DIVERGENCE
+  // Only now: `merge-base` has no `--max-count`, so on unrelated histories it would walk both of
+  // them in full. Reaching here already proved neither side is more than the cap ahead of the
+  // other, which bounds that walk — and unrelated histories of any size fail the counts first.
+  // Required because unrelated histories replace the whole tree however few commits they carry.
+  return hasCommonHistory(repoPath, preparedBase, targetBase, options)
 }
