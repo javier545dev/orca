@@ -15,6 +15,7 @@ import type { PersistedNativeChatSessionOptions } from './native-chat-session-op
 import type { ComputerAwakeMode } from './computer-awake-mode'
 import type { CommitMessageAiSettings } from './commit-message-ai-types'
 import type { HostSettingOverrides } from './host-setting-overrides'
+import type { WorkspaceTrustEntry } from './workspace-trust-types'
 import type {
   ClaudeManagedAccount,
   ClaudeManagedAccountRuntimeSelection,
@@ -496,6 +497,10 @@ export type GlobalSettings = {
   voice?: VoiceSettings
   /** Transcript full-text search consent + retention. Absent means off; nothing indexes until the user opts in. */
   aiVaultSearch?: AiVaultSearchSettings
+  /** Path-based trust decisions (grants and remembered declines). Main-owned; renderer writes only through the dedicated id-only channels, never generic settings:set. */
+  workspaceTrustEntries?: WorkspaceTrustEntry[]
+  /** One-shot marker: existing local repos/folder workspaces are grandfathered as trusted once. */
+  workspaceTrustMigratedExistingWorkspaces?: boolean
 }
 
 export type OrcaWorkspaceLayout = {
