@@ -36,6 +36,7 @@ type CreateRemoteHandlerArgs = {
 }
 
 function findHandler<Args, Result>(channel: string) {
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: `ipcMain.handle` is a heterogeneous registry keyed by channel string, so no type links a channel to its handler signature. The recovered signature is the one `registerRepoCreationHandlers` registers for this channel, and the lookup returns `undefined` for an unregistered channel, which fails the awaiting test immediately.
   return handleMock.mock.calls.find((call) => call[0] === channel)?.[1] as (
     _event: unknown,
     args: Args
@@ -48,6 +49,7 @@ describe('registerRepoCreationHandlers — workspace trust boundary', () => {
     getRepos: vi.fn(() => []),
     addRepo: vi.fn()
   }
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the handlers only forward this window to `notifyReposChanged`, which is mocked above, so no member of `BrowserWindow` is ever read from this stub.
   const mainWindow = {} as never
 
   beforeEach(() => {
@@ -64,12 +66,13 @@ describe('registerRepoCreationHandlers — workspace trust boundary', () => {
   })
 
   it('records a trusted, intake-origin entry in-process before repos:create returns', async () => {
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: `Store` is the whole persistence surface; this fake implements the only two members `repos:create` reaches (`getRepos`, `addRepo`), and every other collaborator is mocked above.
     registerRepoCreationHandlers(mainWindow, store as never)
     const handler = findHandler<CreateHandlerArgs, CreateHandlerResult>('repos:create')
     const parentPath = mkdtempSync(join(tmpdir(), 'workspace-trust-repos-create-'))
     tempDirs.push(parentPath)
 
-    const result = await handler({} as never, { parentPath, name: 'proj', kind: 'folder' })
+    const result = await handler({}, { parentPath, name: 'proj', kind: 'folder' })
 
     expect(result.repo).toBeDefined()
     expect(recordWorkspaceTrustDecisionMock).toHaveBeenCalledWith(
@@ -102,15 +105,19 @@ describe('registerRepoCreationHandlers — workspace trust boundary', () => {
     vi.resetModules()
     handleMock.mockClear()
     const { registerRepoCreationHandlers: register } = await import('./repo-creation-handlers')
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: same fake `Store` as above, re-registered after `vi.resetModules()`; `repos:createRemote` delegates to the mocked `createRemoteRepo` and reaches no unimplemented member.
     register(mainWindow, store as never)
     const handler = findHandler<CreateRemoteHandlerArgs, CreateHandlerResult>('repos:createRemote')
 
-    await handler({} as never, {
-      connectionId: 'ssh-1',
-      parentPath: '/remote',
-      name: 'proj',
-      kind: 'folder'
-    })
+    await handler(
+      {},
+      {
+        connectionId: 'ssh-1',
+        parentPath: '/remote',
+        name: 'proj',
+        kind: 'folder'
+      }
+    )
 
     expect(recordWorkspaceTrustDecisionMock).not.toHaveBeenCalled()
   })

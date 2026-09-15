@@ -6,14 +6,16 @@ import { extractRepositoryUrl, toHttpsUrl } from './npm-manifest-urls'
 const REGISTRY_BASE_URL = 'https://registry.npmjs.org'
 const FETCH_TIMEOUT_MS = 8000
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
 function parsePackument(packageName: string, doc: Record<string, unknown>): NpmPackageInfo | null {
-  const distTags = doc['dist-tags'] as Record<string, unknown> | undefined
+  const distTags = isRecord(doc['dist-tags']) ? doc['dist-tags'] : null
   const latestVersion = typeof distTags?.latest === 'string' ? distTags.latest : null
-  const time = doc.time as Record<string, unknown> | undefined
-  const latestPublishedAt =
-    latestVersion && typeof time?.[latestVersion] === 'string'
-      ? (time[latestVersion] as string)
-      : null
+  const time = isRecord(doc.time) ? doc.time : null
+  const publishedAt = latestVersion === null ? null : time?.[latestVersion]
+  const latestPublishedAt = typeof publishedAt === 'string' ? publishedAt : null
   return {
     packageName,
     description: typeof doc.description === 'string' ? doc.description : null,
@@ -50,7 +52,7 @@ export async function npmRegistryHttpLookup(packageName: string): Promise<NpmPac
     return res.status === 404 ? { status: 'not-found' } : { status: 'unavailable', reason: 'error' }
   }
 
-  const doc = (await res.json()) as Record<string, unknown>
-  const info = parsePackument(packageName, doc)
+  const doc: unknown = await res.json()
+  const info = isRecord(doc) ? parsePackument(packageName, doc) : null
   return info ? { status: 'ok', info } : { status: 'unavailable', reason: 'error' }
 }

@@ -8,16 +8,20 @@ type ButtonCapture = {
   disabled?: boolean
 }
 
-const mocks = vi.hoisted(() => ({
-  buttons: [] as ButtonCapture[],
-  state: {
-    activeModal: 'confirm-workspace-trust',
-    modalData: {} as Record<string, unknown>,
-    closeModal: vi.fn()
+const mocks = vi.hoisted(() => {
+  const buttons: ButtonCapture[] = []
+  const modalData: Record<string, unknown> = {}
+  return {
+    buttons,
+    state: { activeModal: 'confirm-workspace-trust', modalData, closeModal: vi.fn() }
   }
-}))
+})
 
-function textContent(node: ReactModule.ReactNode): string {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function textContent(node: unknown): string {
   if (node == null || typeof node === 'boolean') {
     return ''
   }
@@ -27,8 +31,8 @@ function textContent(node: ReactModule.ReactNode): string {
   if (Array.isArray(node)) {
     return node.map(textContent).join('')
   }
-  if (typeof node === 'object' && 'props' in node) {
-    return textContent((node as { props?: { children?: ReactModule.ReactNode } }).props?.children)
+  if (typeof node === 'object' && node !== null && 'props' in node && isRecord(node.props)) {
+    return textContent(node.props.children)
   }
   return ''
 }

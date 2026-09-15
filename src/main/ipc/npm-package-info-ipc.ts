@@ -10,11 +10,14 @@ import type { Store } from '../persistence'
 
 const MALFORMED_REQUEST_RESULT: NpmPackageInfoResult = { status: 'unavailable', reason: 'error' }
 
-function isWellFormedRequest(value: unknown): value is NpmPackageInfoRequest {
-  if (typeof value !== 'object' || value === null) {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function isWellFormedRequest(request: unknown): request is NpmPackageInfoRequest {
+  if (!isRecord(request)) {
     return false
   }
-  const request = value as Record<string, unknown>
   return (
     typeof request.packageName === 'string' &&
     // The only renderer-supplied value that becomes a subprocess cwd; the

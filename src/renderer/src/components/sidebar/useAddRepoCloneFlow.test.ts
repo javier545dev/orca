@@ -2,30 +2,33 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ReactModule from 'react'
 import type { Repo } from '../../../../shared/repo-types'
 
-const mocks = vi.hoisted(() => ({
-  stateValues: [] as unknown[],
-  stateSetters: [] as ReturnType<typeof vi.fn>[],
-  stateIndex: 0,
-  refValues: [] as unknown[],
-  refIndex: 0,
+const mocks = vi.hoisted(() => {
   /** Every ref object the hook created, in creation order, so a test can supersede a flow mid-run. */
-  createdRefs: [] as { current: unknown }[],
-  storeState: {
-    settings: { activeRuntimeEnvironmentId: null as string | null },
-    repos: [] as Repo[],
-    projects: [],
-    projectHostSetups: []
-  },
-  cloneRemote: vi.fn(),
-  cloneLocal: vi.fn(),
-  pickDirectory: vi.fn(),
-  onCloneProgress: vi.fn(() => vi.fn()),
-  callRuntimeRpc: vi.fn(),
-  fetchWorktrees: vi.fn(),
-  onGitRepoReady: vi.fn(),
-  resolveIntake: vi.fn(() => Promise.resolve({ outcome: 'not-applicable' })),
-  decide: vi.fn()
-}))
+  const createdRefs: { current: unknown }[] = []
+  return {
+    stateValues: [] as unknown[],
+    stateSetters: [] as ReturnType<typeof vi.fn>[],
+    stateIndex: 0,
+    refValues: [] as unknown[],
+    refIndex: 0,
+    createdRefs,
+    storeState: {
+      settings: { activeRuntimeEnvironmentId: null as string | null },
+      repos: [] as Repo[],
+      projects: [],
+      projectHostSetups: []
+    },
+    cloneRemote: vi.fn(),
+    cloneLocal: vi.fn(),
+    pickDirectory: vi.fn(),
+    onCloneProgress: vi.fn(() => vi.fn()),
+    callRuntimeRpc: vi.fn(),
+    fetchWorktrees: vi.fn(),
+    onGitRepoReady: vi.fn(),
+    resolveIntake: vi.fn(() => Promise.resolve({ outcome: 'not-applicable' })),
+    decide: vi.fn()
+  }
+})
 
 vi.mock('react', async (importOriginal) => {
   const actual = await importOriginal<typeof ReactModule>()
@@ -40,7 +43,7 @@ vi.mock('react', async (importOriginal) => {
       const ref = {
         current: index in mocks.refValues ? (mocks.refValues[index] as T) : value
       }
-      mocks.createdRefs.push(ref as { current: unknown })
+      mocks.createdRefs.push(ref)
       return ref
     },
     useState: <T>(initial: T | (() => T)) => {
@@ -295,6 +298,7 @@ describe('useAddRepoCloneFlow', () => {
     })
     // The second ref the hook creates is the monotonic clone generation; bumping it
     // mid-refresh is exactly what starting or resetting another clone does.
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the hook seeds that ref with `useRef(0)`, so the recorded object is the numeric clone generation; if the hook ever reordered its refs the increment below would produce `NaN` and the staleness assertion would fail rather than pass quietly.
     const cloneGenRef = mocks.createdRefs[1] as { current: number }
     mocks.fetchWorktrees.mockImplementation(async () => {
       cloneGenRef.current += 1

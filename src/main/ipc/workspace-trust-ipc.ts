@@ -1,4 +1,3 @@
-import type { BrowserWindow } from 'electron'
 import { ipcMain } from 'electron'
 import type { Store } from '../persistence'
 import type { WorkspaceTrustEntry, WorkspaceTrustTarget } from '../../shared/workspace-trust-types'
@@ -15,21 +14,21 @@ export type WorkspaceTrustResolveIntakeResult =
   | WorkspaceTrustIntakeResolution
   | { outcome: 'not-applicable' }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
 function parseTarget(raw: unknown): WorkspaceTrustTarget | null {
-  if (!raw || typeof raw !== 'object') {
+  if (!isRecord(raw) || !isRecord(raw.target)) {
     return null
   }
-  const target = (raw as { target?: unknown }).target
-  if (!target || typeof target !== 'object') {
-    return null
-  }
-  const kind = (target as { kind?: unknown }).kind
-  if (kind === 'repo') {
-    const repoId = (target as { repoId?: unknown }).repoId
+  const target = raw.target
+  if (target.kind === 'repo') {
+    const repoId = target.repoId
     return typeof repoId === 'string' ? { kind: 'repo', repoId } : null
   }
-  if (kind === 'folderWorkspace') {
-    const folderWorkspaceId = (target as { folderWorkspaceId?: unknown }).folderWorkspaceId
+  if (target.kind === 'folderWorkspace') {
+    const folderWorkspaceId = target.folderWorkspaceId
     return typeof folderWorkspaceId === 'string'
       ? { kind: 'folderWorkspace', folderWorkspaceId }
       : null
@@ -74,11 +73,7 @@ async function resolveIntakeHandler(
 }
 
 async function decideHandler(store: Store, rawArgs: unknown): Promise<WorkspaceTrustEntry | null> {
-  const raw = rawArgs as {
-    target?: unknown
-    scope?: 'workspace' | 'parent'
-    decision?: 'trust' | 'decline'
-  }
+  const raw = isRecord(rawArgs) ? rawArgs : null
   const target = parseTarget(raw)
   const scope = raw?.scope === 'parent' ? 'parent' : 'workspace'
   const decision = raw?.decision === 'decline' ? 'decline' : 'trust'
@@ -96,14 +91,14 @@ async function decideHandler(store: Store, rawArgs: unknown): Promise<WorkspaceT
 }
 
 async function revokeHandler(store: Store, rawArgs: unknown): Promise<boolean> {
-  const entryId = (rawArgs as { entryId?: unknown })?.entryId
+  const entryId = isRecord(rawArgs) ? rawArgs.entryId : undefined
   if (typeof entryId !== 'string') {
     return false
   }
   return revokeWorkspaceTrustEntry(store, entryId)
 }
 
-export function registerWorkspaceTrustHandlers(_mainWindow: BrowserWindow, store: Store): void {
+export function registerWorkspaceTrustHandlers(store: Store): void {
   ipcMain.removeHandler('workspaceTrust:resolveIntake')
   ipcMain.removeHandler('workspaceTrust:decide')
   ipcMain.removeHandler('workspaceTrust:revoke')

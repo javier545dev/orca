@@ -30,7 +30,8 @@ const WorkspaceTrustPromptDialog = React.memo(function WorkspaceTrustPromptDialo
   const parentPath = path ? dirname(path) : ''
   const onResolve =
     typeof modalData.onResolve === 'function'
-      ? (modalData.onResolve as (decision: WorkspaceTrustPromptDecision) => void)
+      ? // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: `ensureWorkspaceTrustConfirmed` is the only opener of the `confirm-workspace-trust` slot and always stores its own `(decision: WorkspaceTrustPromptDecision) => void` settler here; this component renders only while that slot is active, and `typeof` has already established the value is callable.
+        (modalData.onResolve as (decision: WorkspaceTrustPromptDecision) => void)
       : null
 
   const resolveAndClose = useCallback(
@@ -54,13 +55,13 @@ const WorkspaceTrustPromptDialog = React.memo(function WorkspaceTrustPromptDialo
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-md sm:max-w-md" showCloseButton={false}>
         <DialogHeader>
-          <DialogTitle className="text-sm">
+          <DialogTitle>
             {translate(
               'auto.components.sidebar.WorkspaceTrustPromptDialog.title',
               'Trust this location?'
             )}
           </DialogTitle>
-          <DialogDescription className="text-xs">
+          <DialogDescription>
             {translate(
               'auto.components.sidebar.WorkspaceTrustPromptDialog.body',
               '{{path}} is not trusted yet. Trusting it lets Orca run local tools scoped to this folder — such as reading package details from your local npm client — and the decision applies to everything nested beneath it too.',
@@ -69,7 +70,7 @@ const WorkspaceTrustPromptDialog = React.memo(function WorkspaceTrustPromptDialo
           </DialogDescription>
         </DialogHeader>
 
-        <DialogFooter className="flex-col gap-2 sm:flex-col sm:items-stretch">
+        <DialogFooter className="flex-col sm:flex-col sm:items-stretch">
           <Button
             variant="outline"
             size="sm"

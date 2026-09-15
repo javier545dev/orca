@@ -64,7 +64,7 @@ function viewSpec(): {
   cwd: string
   timeoutMs: number
 } {
-  const call = runProcessMock.mock.calls.find((c) => (c[0].args as string[]).includes('view'))
+  const call = runProcessMock.mock.calls.find((c) => c[0].args.includes('view'))
   return call![0]
 }
 
@@ -292,8 +292,8 @@ describe('npmCliPackageView scoped registry containment', () => {
   /** The keys passed to `npm config get`, in call order. */
   function probedKeys(): string[] {
     return runProcessMock.mock.calls
-      .filter((call) => (call[0].args as string[]).includes('config'))
-      .map((call) => (call[0].args as string[]).at(-1)!)
+      .filter((call) => call[0].args.includes('config'))
+      .map((call) => call[0].args.at(-1)!)
   }
 
   it('refuses a scoped package whose scope registry is plaintext, even on an https default', async () => {
@@ -306,9 +306,7 @@ describe('npmCliPackageView scoped registry containment', () => {
 
     expect(result).toEqual({ status: 'npm-unresolvable' })
     expect(probedKeys()).toEqual(['registry', '@types:registry'])
-    expect(runProcessMock.mock.calls.some((c) => (c[0].args as string[]).includes('view'))).toBe(
-      false
-    )
+    expect(runProcessMock.mock.calls.some((c) => c[0].args.includes('view'))).toBe(false)
   })
 
   it('proceeds when the scope registry is https', async () => {

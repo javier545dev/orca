@@ -5,23 +5,26 @@ import type { Repo } from '../../../../shared/repo-types'
 // Guards Req: Provenance-Based Trust Defaults / A created repo is trusted immediately —
 // `repos:create` writes trust in-process on the main side (see repo-creation-handlers.ts);
 // the renderer create flow must never call the trust channel at all.
-const mocks = vi.hoisted(() => ({
-  stateValues: [] as unknown[],
-  stateSetters: [] as ReturnType<typeof vi.fn>[],
-  stateIndex: 0,
-  storeState: {
-    settings: { activeRuntimeEnvironmentId: null as string | null },
-    repos: [] as Repo[],
-    projects: [],
-    projectHostSetups: [],
-    worktreesByRepo: {} as Record<string, unknown[]>
-  },
-  createRepo: vi.fn(),
-  fetchWorktrees: vi.fn(),
-  onGitRepoReady: vi.fn(),
-  resolveIntake: vi.fn(),
-  markOnboardingProjectAdded: vi.fn()
-}))
+const mocks = vi.hoisted(() => {
+  const worktreesByRepo: Record<string, unknown[]> = {}
+  return {
+    stateValues: [] as unknown[],
+    stateSetters: [] as ReturnType<typeof vi.fn>[],
+    stateIndex: 0,
+    storeState: {
+      settings: { activeRuntimeEnvironmentId: null as string | null },
+      repos: [] as Repo[],
+      projects: [],
+      projectHostSetups: [],
+      worktreesByRepo
+    },
+    createRepo: vi.fn(),
+    fetchWorktrees: vi.fn(),
+    onGitRepoReady: vi.fn(),
+    resolveIntake: vi.fn(),
+    markOnboardingProjectAdded: vi.fn()
+  }
+})
 
 vi.mock('react', async (importOriginal) => {
   const actual = await importOriginal<typeof ReactModule>()

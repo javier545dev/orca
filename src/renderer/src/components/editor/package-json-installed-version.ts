@@ -42,12 +42,16 @@ export function buildNodeModulesCandidatePaths(
 }
 
 function parsePackageJsonVersionField(content: string): string | null {
+  let parsed: unknown
   try {
-    const parsed = JSON.parse(content) as { version?: unknown }
-    return typeof parsed.version === 'string' ? parsed.version : null
+    parsed = JSON.parse(content)
   } catch {
     return null
   }
+  if (typeof parsed !== 'object' || parsed === null || !('version' in parsed)) {
+    return null
+  }
+  return typeof parsed.version === 'string' ? parsed.version : null
 }
 
 /**

@@ -27,7 +27,7 @@ test.describe('Repository workspace trust status card', () => {
       if (!repo) {
         throw new Error('no seeded repo in the store')
       }
-      return repo.id as string
+      return repo.id
     })
 
     const search = orcaPage.getByPlaceholder('Search settings')
@@ -41,11 +41,18 @@ test.describe('Repository workspace trust status card', () => {
       .filter({ has: orcaPage.getByRole('heading', { name: 'Workspace Trust', exact: true }) })
       .first()
 
-    const decide = async (args: DecideArgs): Promise<string | null> =>
-      orcaPage.evaluate(async (a: DecideArgs) => {
+    const decide = async (args: DecideArgs): Promise<string> => {
+      const entryId = await orcaPage.evaluate(async (a: DecideArgs) => {
         const entry = await window.api.workspaceTrust.decide(a)
         return entry?.id ?? null
       }, args)
+      if (entryId === null) {
+        throw new Error(
+          `workspaceTrust.decide recorded no entry for ${args.scope}/${args.decision}`
+        )
+      }
+      return entryId
+    }
 
     const revoke = async (entryId: string): Promise<void> => {
       await orcaPage.evaluate(async (id: string) => {
@@ -66,7 +73,7 @@ test.describe('Repository workspace trust status card', () => {
     expect(directId).not.toBeNull()
     await expect(card.getByText('Trusted', { exact: true })).toBeVisible()
     await card.screenshot({ path: path.join(SHOT_DIR, '2-trusted-direct.png') })
-    await revoke(directId as string)
+    await revoke(directId)
 
     // 3. Trusted through an ancestor — the card must name it and offer both exits.
     const parentId = await decide({
@@ -77,7 +84,7 @@ test.describe('Repository workspace trust status card', () => {
     expect(parentId).not.toBeNull()
     await expect(card.getByText(/Trust inherited from/)).toBeVisible()
     await card.screenshot({ path: path.join(SHOT_DIR, '3-trusted-inherited.png') })
-    await revoke(parentId as string)
+    await revoke(parentId)
 
     // 4. A remembered decline is not the absence of a decision.
     const declinedId = await decide({

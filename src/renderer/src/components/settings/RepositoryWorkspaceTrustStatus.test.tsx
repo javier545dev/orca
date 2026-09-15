@@ -7,9 +7,10 @@ import type { Repo } from '../../../../shared/repo-types'
 import type { WorkspaceTrustEntry } from '../../../../shared/workspace-trust-types'
 import { RepositoryWorkspaceTrustStatus } from './RepositoryWorkspaceTrustStatus'
 
-const mocks = vi.hoisted(() => ({
-  entries: [] as WorkspaceTrustEntry[]
-}))
+const mocks = vi.hoisted(() => {
+  const entries: WorkspaceTrustEntry[] = []
+  return { entries }
+})
 
 vi.mock('../../store', () => ({
   useAppStore: (selector: (state: { settings: unknown }) => unknown) =>

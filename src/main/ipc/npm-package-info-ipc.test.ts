@@ -20,6 +20,7 @@ vi.mock('../npm-package-info/npm-package-info-service', () => ({
 const { registerNpmPackageInfoHandlers } = await import('./npm-package-info-ipc')
 const { NPM_PACKAGE_INFO_LOOKUP_CHANNEL } = await import('../../shared/npm-package-info-types')
 
+// oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: `createNpmPackageInfoService` is mocked above, so the registrar only forwards this value; no member of `Store` is ever read from it.
 const fakeStore = {} as Store
 const fakeEvent = {}
 

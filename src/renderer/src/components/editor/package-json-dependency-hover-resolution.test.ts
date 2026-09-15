@@ -221,10 +221,10 @@ describe('rejects dependency keys that are not valid npm package names', () => {
       modelText: `{ "dependencies": { ${JSON.stringify(packageName)}: "1.0.0" } }`,
       offset: `{ "dependencies": { "`.length + 1,
       isCancelled: () => false,
-      resolveContext: () => ({ worktreeId: 'w1', filePath: '/repo/package.json' }) as never,
+      resolveContext: () => CONTEXT,
       resolveInstalledVersion,
       lookupPackageInfo
-    } as never)
+    })
 
     expect(resolveInstalledVersion).not.toHaveBeenCalled()
     expect(lookupPackageInfo).not.toHaveBeenCalled()

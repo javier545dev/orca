@@ -63,17 +63,23 @@ function fakeStore(options: {
   repoPath?: string
   entries?: WorkspaceTrustEntry[]
 }): Store {
-  const repos = options.repoPath
-    ? [{ id: REPO_ID, path: options.repoPath, name: 'repo' } as unknown as Repo]
+  const repos: Repo[] = options.repoPath
+    ? [
+        {
+          id: REPO_ID,
+          path: options.repoPath,
+          displayName: 'repo',
+          badgeColor: '#000000',
+          addedAt: 0
+        }
+      ]
     : []
-  return {
-    getSettings: () =>
-      ({
-        ...options.settings,
-        workspaceTrustEntries: options.entries ?? []
-      }) as GlobalSettings,
-    getRepos: () => repos
-  } as unknown as Store
+  const settings: Partial<GlobalSettings> = {
+    ...options.settings,
+    workspaceTrustEntries: options.entries ?? []
+  }
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: `Store` is the whole persistence surface and `GlobalSettings` has ~220 members; the service reads only `getSettings().npmPackageInfoOnlineLookupsEnabled`, `getSettings().workspaceTrustEntries` and `getRepos()`, all of which this fake supplies, and every other collaborator it reaches is mocked above.
+  return { getSettings: () => settings, getRepos: () => repos } as unknown as Store
 }
 
 /** Registers the repo root the way a real repo load does, so authorization runs for real without git. */
@@ -100,7 +106,7 @@ function mockNpmView(view: ReturnType<typeof processResult>): void {
 }
 
 function viewSpec(): { cwd: string; args: string[] } {
-  const call = runProcessMock.mock.calls.find((c) => (c[0].args as string[]).includes('view'))
+  const call = runProcessMock.mock.calls.find((c) => c[0].args.includes('view'))
   return call![0]
 }
 

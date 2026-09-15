@@ -23,7 +23,7 @@ export function extractRepositoryUrl(repository: unknown): string | null {
     typeof repository === 'string'
       ? repository
       : typeof repository === 'object' && repository !== null && 'url' in repository
-        ? (repository as { url?: unknown }).url
+        ? repository.url
         : null
   return typeof raw === 'string' ? toHttpsUrl(raw.replace(/^git\+/, '')) : null
 }

@@ -76,7 +76,7 @@ describe('buildPackageJsonDependencyHoverMarkdown', () => {
     const markdownHttp = buildMarkdown({
       packageName: 'react',
       installedVersion: { status: 'not-installed' },
-      result: okResult({ homepageUrl: 'http://react.dev' as never })
+      result: okResult({ homepageUrl: 'http://react.dev' })
     })
     expect(markdownHttp).not.toContain('http://react.dev')
   })

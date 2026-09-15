@@ -5,6 +5,10 @@ import { extractRepositoryUrl, toHttpsUrl } from './npm-manifest-urls'
 
 const NPM_VIEW_TIMEOUT_MS = 8000
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
 /**
  * Why an allowlist instead of `process.env`: a project `.npmrc` committed in a
  * repository can point npm at any host AND substitute `${VAR}` from the child
@@ -123,32 +127,35 @@ async function resolvesToHttpsRegistry(
 export type NpmCliPackageViewResult = NpmPackageInfoResult | { status: 'npm-unresolvable' }
 
 function parseManifest(packageName: string, stdout: string): NpmPackageInfo | null {
+  let manifest: unknown
   try {
-    const manifest = JSON.parse(stdout) as Record<string, unknown>
-    // Why the bracketed key: with field selectors npm returns a flat object
-    // keyed by the literal selectors, so `dist-tags.latest` is one key rather
-    // than a nested path.
-    const latestVersion =
-      typeof manifest['dist-tags.latest'] === 'string'
-        ? (manifest['dist-tags.latest'] as string)
-        : typeof manifest.version === 'string'
-          ? manifest.version
-          : null
-    const time = manifest.time as Record<string, unknown> | undefined
-    return {
-      packageName,
-      description: typeof manifest.description === 'string' ? manifest.description : null,
-      latestVersion,
-      latestPublishedAt:
-        latestVersion && typeof time?.[latestVersion] === 'string'
-          ? (time[latestVersion] as string)
-          : null,
-      homepageUrl: toHttpsUrl(manifest.homepage),
-      repositoryUrl: extractRepositoryUrl(manifest.repository),
-      source: 'npm-cli'
-    }
+    manifest = JSON.parse(stdout)
   } catch {
     return null
+  }
+  if (!isRecord(manifest)) {
+    return null
+  }
+  // Why the bracketed key: with field selectors npm returns a flat object
+  // keyed by the literal selectors, so `dist-tags.latest` is one key rather
+  // than a nested path.
+  const distTagLatest = manifest['dist-tags.latest']
+  const latestVersion =
+    typeof distTagLatest === 'string'
+      ? distTagLatest
+      : typeof manifest.version === 'string'
+        ? manifest.version
+        : null
+  const time = isRecord(manifest.time) ? manifest.time : null
+  const publishedAt = latestVersion === null ? null : time?.[latestVersion]
+  return {
+    packageName,
+    description: typeof manifest.description === 'string' ? manifest.description : null,
+    latestVersion,
+    latestPublishedAt: typeof publishedAt === 'string' ? publishedAt : null,
+    homepageUrl: toHttpsUrl(manifest.homepage),
+    repositoryUrl: extractRepositoryUrl(manifest.repository),
+    source: 'npm-cli'
   }
 }
 
@@ -202,7 +209,7 @@ export async function npmCliPackageView(
     // Why ENOENT is distinct: `resolveCliCommand` never returns null, so a
     // spawn-time ENOENT is the only signal that no npm binary actually
     // exists on this host — the service falls back to the HTTP path on it.
-    const isEnoent = (error as NodeJS.ErrnoException | null)?.code === 'ENOENT'
+    const isEnoent = isRecord(error) && error.code === 'ENOENT'
     return isEnoent ? { status: 'npm-unresolvable' } : { status: 'unavailable', reason: 'error' }
   }
 

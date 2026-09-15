@@ -27,7 +27,7 @@ function worktree(overrides: Partial<Worktree> & Pick<Worktree, 'id' | 'repoId'>
     sortOrder: 0,
     lastActivityAt: 0,
     ...overrides
-  } as Worktree
+  }
 }
 
 function repo(overrides: Partial<Repo> & Pick<Repo, 'id'>): Repo {
@@ -38,7 +38,7 @@ function repo(overrides: Partial<Repo> & Pick<Repo, 'id'>): Repo {
     addedAt: 0,
     connectionId: null,
     ...overrides
-  } as Repo
+  }
 }
 
 function openFile(
@@ -51,7 +51,7 @@ function openFile(
     isDirty: false,
     mode: 'edit',
     ...overrides
-  } as OpenFile
+  }
 }
 
 function baseState(

@@ -29,6 +29,7 @@ vi.mock('../workspace-trust/workspace-trust-service', () => ({
 import { registerWorkspaceTrustHandlers } from './workspace-trust-ipc'
 
 function findHandler<Args, Result>(channel: string) {
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: `ipcMain.handle` is a heterogeneous registry keyed by channel string, so no type links a channel to its handler signature. The recovered signature is the one `registerWorkspaceTrustHandlers` registers for this channel, and the lookup returns `undefined` for an unregistered channel, which fails the awaiting test immediately.
   return handleMock.mock.calls.find((call) => call[0] === channel)?.[1] as (
     _event: unknown,
     args: Args
@@ -36,7 +37,6 @@ function findHandler<Args, Result>(channel: string) {
 }
 
 describe('registerWorkspaceTrustHandlers', () => {
-  const mainWindow = {} as never
   type FakeRepo = { id: string; path: string; connectionId: string | null }
   const store = {
     getRepos: vi.fn((): FakeRepo[] => [
@@ -55,7 +55,8 @@ describe('registerWorkspaceTrustHandlers', () => {
     revokeWorkspaceTrustEntryMock.mockClear()
     store.getRepos.mockClear()
     store.getFolderWorkspace.mockClear()
-    registerWorkspaceTrustHandlers(mainWindow, store as never)
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: `Store` is the whole persistence surface; this fake implements the only two readers the handlers reach (`getRepos`, `getFolderWorkspace`), and the trust writers that would use the rest are mocked out above, so an unimplemented member can never be called.
+    registerWorkspaceTrustHandlers(store as never)
   })
 
   describe('workspaceTrust:resolveIntake — security boundary', () => {
@@ -66,10 +67,13 @@ describe('registerWorkspaceTrustHandlers', () => {
       })
       const handler = findHandler('workspaceTrust:resolveIntake')
 
-      await handler({} as never, {
-        target: { kind: 'repo', repoId: 'repo-1' },
-        provenance: 'created'
-      })
+      await handler(
+        {},
+        {
+          target: { kind: 'repo', repoId: 'repo-1' },
+          provenance: 'created'
+        }
+      )
 
       expect(resolveWorkspaceTrustIntakeMock).toHaveBeenCalledTimes(1)
       const forwardedProvenance = resolveWorkspaceTrustIntakeMock.mock.calls[0][2]
@@ -84,11 +88,14 @@ describe('registerWorkspaceTrustHandlers', () => {
       })
       const handler = findHandler('workspaceTrust:resolveIntake')
 
-      const result = await handler({} as never, {
-        target: { kind: 'repo', repoId: 'repo-1' },
-        provenance: 'created',
-        path: '/some/other/path'
-      })
+      const result = await handler(
+        {},
+        {
+          target: { kind: 'repo', repoId: 'repo-1' },
+          provenance: 'created',
+          path: '/some/other/path'
+        }
+      )
 
       expect(resolveWorkspaceTrustIntakeMock).toHaveBeenCalledWith(
         '/home/user/work/proj',
@@ -107,7 +114,7 @@ describe('registerWorkspaceTrustHandlers', () => {
       })
       const handler = findHandler('workspaceTrust:resolveIntake')
 
-      await handler({} as never, { target: { kind: 'folderWorkspace', folderWorkspaceId: 'fw-1' } })
+      await handler({}, { target: { kind: 'folderWorkspace', folderWorkspaceId: 'fw-1' } })
 
       expect(resolveWorkspaceTrustIntakeMock).toHaveBeenCalledWith(
         '/home/user/notes',
@@ -119,7 +126,7 @@ describe('registerWorkspaceTrustHandlers', () => {
     it('returns not-applicable for an unknown repo id', async () => {
       const handler = findHandler('workspaceTrust:resolveIntake')
 
-      const result = await handler({} as never, { target: { kind: 'repo', repoId: 'missing' } })
+      const result = await handler({}, { target: { kind: 'repo', repoId: 'missing' } })
 
       expect(result).toEqual({ outcome: 'not-applicable' })
       expect(resolveWorkspaceTrustIntakeMock).not.toHaveBeenCalled()
@@ -131,7 +138,7 @@ describe('registerWorkspaceTrustHandlers', () => {
       ])
       const handler = findHandler('workspaceTrust:resolveIntake')
 
-      const result = await handler({} as never, { target: { kind: 'repo', repoId: 'repo-2' } })
+      const result = await handler({}, { target: { kind: 'repo', repoId: 'repo-2' } })
 
       expect(result).toEqual({ outcome: 'not-applicable' })
       expect(resolveWorkspaceTrustIntakeMock).not.toHaveBeenCalled()
@@ -140,7 +147,7 @@ describe('registerWorkspaceTrustHandlers', () => {
     it('returns not-applicable for a malformed target payload', async () => {
       const handler = findHandler('workspaceTrust:resolveIntake')
 
-      const result = await handler({} as never, { target: { kind: 'nonsense' } })
+      const result = await handler({}, { target: { kind: 'nonsense' } })
 
       expect(result).toEqual({ outcome: 'not-applicable' })
     })
@@ -150,11 +157,14 @@ describe('registerWorkspaceTrustHandlers', () => {
     it('resolves the path from the store and records the decision for scope:workspace', async () => {
       const handler = findHandler('workspaceTrust:decide')
 
-      const result = await handler({} as never, {
-        target: { kind: 'repo', repoId: 'repo-1' },
-        scope: 'workspace',
-        decision: 'trust'
-      })
+      const result = await handler(
+        {},
+        {
+          target: { kind: 'repo', repoId: 'repo-1' },
+          scope: 'workspace',
+          decision: 'trust'
+        }
+      )
 
       expect(recordWorkspaceTrustDecisionMock).toHaveBeenCalledWith(store, {
         path: '/home/user/work/proj',
@@ -168,11 +178,14 @@ describe('registerWorkspaceTrustHandlers', () => {
     it('computes scope:parent as dirname in main, never trusting a renderer-supplied path', async () => {
       const handler = findHandler('workspaceTrust:decide')
 
-      await handler({} as never, {
-        target: { kind: 'repo', repoId: 'repo-1' },
-        scope: 'parent',
-        decision: 'trust'
-      })
+      await handler(
+        {},
+        {
+          target: { kind: 'repo', repoId: 'repo-1' },
+          scope: 'parent',
+          decision: 'trust'
+        }
+      )
 
       // The handler passes the resolved (non-parent) path through unchanged — `scope:'parent'`
       // is resolved to the dirname inside `recordWorkspaceTrustDecision` itself, not here, so a
@@ -188,11 +201,14 @@ describe('registerWorkspaceTrustHandlers', () => {
     it('returns null and records nothing for an unresolvable target', async () => {
       const handler = findHandler('workspaceTrust:decide')
 
-      const result = await handler({} as never, {
-        target: { kind: 'repo', repoId: 'missing' },
-        scope: 'workspace',
-        decision: 'trust'
-      })
+      const result = await handler(
+        {},
+        {
+          target: { kind: 'repo', repoId: 'missing' },
+          scope: 'workspace',
+          decision: 'trust'
+        }
+      )
 
       expect(result).toBeNull()
       expect(recordWorkspaceTrustDecisionMock).not.toHaveBeenCalled()
@@ -203,7 +219,7 @@ describe('registerWorkspaceTrustHandlers', () => {
     it('revokes by entry id only', async () => {
       const handler = findHandler('workspaceTrust:revoke')
 
-      const result = await handler({} as never, { entryId: 'entry-1' })
+      const result = await handler({}, { entryId: 'entry-1' })
 
       expect(revokeWorkspaceTrustEntryMock).toHaveBeenCalledWith(store, 'entry-1')
       expect(result).toBe(true)

@@ -1,9 +1,10 @@
+import type { OnMount } from '@monaco-editor/react'
 import { describe, expect, it, vi } from 'vitest'
 import { ensurePackageJsonDependencyHoverProvider } from './monaco-package-json-dependency-hover'
 
-function fakeMonaco(): {
-  languages: { registerHoverProvider: ReturnType<typeof vi.fn> }
-} {
+type FakeMonaco = { languages: { registerHoverProvider: ReturnType<typeof vi.fn> } }
+
+function fakeMonaco(): FakeMonaco {
   return {
     languages: {
       registerHoverProvider: vi.fn(() => ({ dispose: vi.fn() }))
@@ -11,13 +12,18 @@ function fakeMonaco(): {
   }
 }
 
+function asMonacoApi(fake: FakeMonaco): Parameters<OnMount>[1] {
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the Monaco namespace cannot be constructed in a unit test, and `ensurePackageJsonDependencyHoverProvider` reads only `languages.registerHoverProvider`, which this fake implements; reaching any other member would throw here rather than pass silently.
+  return fake as never
+}
+
 describe('ensurePackageJsonDependencyHoverProvider', () => {
   it('registers exactly once across repeated calls with the same Monaco instance', () => {
     const monaco = fakeMonaco()
 
-    ensurePackageJsonDependencyHoverProvider(monaco as never)
-    ensurePackageJsonDependencyHoverProvider(monaco as never)
-    ensurePackageJsonDependencyHoverProvider(monaco as never)
+    ensurePackageJsonDependencyHoverProvider(asMonacoApi(monaco))
+    ensurePackageJsonDependencyHoverProvider(asMonacoApi(monaco))
+    ensurePackageJsonDependencyHoverProvider(asMonacoApi(monaco))
 
     expect(monaco.languages.registerHoverProvider).toHaveBeenCalledTimes(1)
     expect(monaco.languages.registerHoverProvider).toHaveBeenCalledWith(
@@ -32,8 +38,8 @@ describe('ensurePackageJsonDependencyHoverProvider', () => {
     const disposeA = vi.fn()
     monacoA.languages.registerHoverProvider.mockReturnValueOnce({ dispose: disposeA })
 
-    ensurePackageJsonDependencyHoverProvider(monacoA as never)
-    ensurePackageJsonDependencyHoverProvider(monacoB as never)
+    ensurePackageJsonDependencyHoverProvider(asMonacoApi(monacoA))
+    ensurePackageJsonDependencyHoverProvider(asMonacoApi(monacoB))
 
     expect(disposeA).toHaveBeenCalledTimes(1)
     expect(monacoB.languages.registerHoverProvider).toHaveBeenCalledTimes(1)
